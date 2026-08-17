@@ -1,0 +1,1120 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: Virtual Shelf Book Service API
+  version: 0.1.0
+  description: |
+    Virtual Shelf MSA의 Book Service 계약이다.
+    책 표지 OCR, 외부 도서 검색, AI 도서 분석, 개인 서재 관리와 독서 진도를 제공한다.
+
+    모든 API는 인증이 필요하다. 사용자 식별자는 요청 body가 아니라 검증된 인증 principal에서 얻는다.
+  contact:
+    name: Virtual Shelf Book Service Team
+servers:
+  - url: /
+    description: 현재 호스트
+security:
+  - bearerAuth: []
+tags:
+  - name: Book Discovery
+    description: 책 표지 인식, 외부 도서 검색, AI 도서 분석
+  - name: Library
+    description: 로그인 사용자의 개인 서재 관리
+  - name: Reading Progress
+    description: 개인 서재 도서의 독서 진도 관리
+
+paths:
+  /api/v1/books/ocr:
+    post:
+      tags: [Book Discovery]
+      operationId: analyzeBookCover
+      summary: 표지 OCR 분석
+      description: 책 표지 이미지를 저장하고 OCR로 분석하여 제목과 저자를 추출한다.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 책 표지 이미지 파일
+      responses:
+        "200":
+          description: OCR 분석 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookOcrResponse"
+              example:
+                S3ImageUrl: https://example-bucket.s3.amazonaws.com/books/cover.jpg
+                extractedTitle: 어린 왕자
+                extractedAuthor: 앙투안 드 생텍쥐페리
+                confidence: 0.94
+        "400":
+          $ref: "#/components/responses/InvalidImageFile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/BookOcrFailed"
+        "502":
+          $ref: "#/components/responses/OcrServiceError"
+
+  /api/v1/books/search:
+    get:
+      tags: [Book Discovery]
+      operationId: searchBookInfo
+      summary: 도서 정보 조회
+      description: |
+        제목과 저자를 기반으로 외부 도서 API를 검색한다.
+        title과 author 중 하나 이상은 공백이 아닌 값이어야 한다.
+        검색 결과가 없으면 200과 빈 books 배열을 반환한다.
+      parameters:
+        - name: title
+          in: query
+          required: false
+          description: 도서 제목
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+          example: 어린 왕자
+        - name: author
+          in: query
+          required: false
+          description: 저자명
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+          example: 생텍쥐페리
+      responses:
+        "200":
+          description: 도서 검색 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookSearchResponse"
+              example:
+                books:
+                  - externalBookId: "9788932917245"
+                    title: 어린 왕자
+                    author: 앙투안 드 생텍쥐페리
+                    isbn: "9788932917245"
+                    publisher: 열린책들
+                    publishedDate: "2015-10-20"
+                    totalPages: 160
+                    externalImageUrl: https://example.com/covers/9788932917245.jpg
+                    genre: 소설
+                    kdc: "863"
+                    source: NATIONAL_LIBRARY
+        "400":
+          $ref: "#/components/responses/InvalidSearchParameter"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/BookApiError"
+
+  /api/v1/books/ai-analyze:
+    post:
+      tags: [Book Discovery]
+      operationId: analyzeBookWithAI
+      summary: AI 도서 분석
+      description: 도서 정보를 분석해 무드 태그를 생성하고 필요한 경우 부족한 정보를 보완한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiBookAnalysisRequest"
+            example:
+              title: 어린 왕자
+              author: 앙투안 드 생텍쥐페리
+              isbn: "9788932917245"
+              publisher: 열린책들
+              publishedDate: "2015-10-20"
+              totalPages: 160
+              genre: 소설
+              description: 어린 왕자와 비행사의 만남을 통해 삶과 관계의 의미를 이야기하는 소설입니다.
+              coverUrl: https://example.com/covers/9788932917245.jpg
+      responses:
+        "200":
+          description: AI 도서 분석 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiBookAnalysisResponse"
+              example:
+                title: 어린 왕자
+                author: 앙투안 드 생텍쥐페리
+                genre: 소설
+                moodTags: [따뜻함, 감성적, 사색적]
+                fallbackUsed: false
+        "400":
+          $ref: "#/components/responses/InvalidAiBookData"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/AiAnalysisFailed"
+        "502":
+          $ref: "#/components/responses/BedrockServiceError"
+
+  /api/v1/library/books:
+    post:
+      tags: [Library]
+      operationId: createLibraryBook
+      summary: 서재 책 등록
+      description: 사용자가 최종 확인한 도서 정보를 로그인 사용자의 개인 서재에 등록한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLibraryBookRequest"
+            example:
+              title: 어린 왕자
+              author: 앙투안 드 생텍쥐페리
+              isbn: "9788932917245"
+              publisher: 열린책들
+              publishedDate: "2015-10-20"
+              totalPages: 160
+              genre: 소설
+              moodTags: [따뜻함, 감성적, 사색적]
+              coverUrl: https://example.com/covers/9788932917245.jpg
+      responses:
+        "201":
+          description: 서재 책 등록 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateLibraryBookResponse"
+              example:
+                bookId: 123
+                title: 어린 왕자
+                author: 앙투안 드 생텍쥐페리
+                currentPage: 0
+                progress: 0.0
+        "400":
+          $ref: "#/components/responses/InvalidCreateBookData"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/BookAlreadyRegistered"
+
+    get:
+      tags: [Library]
+      operationId: getLibraryBooks
+      summary: 서재 도서 목록 조회
+      description: 로그인 사용자의 서재에서 필터, 정렬, 페이지 조건에 맞는 도서를 조회한다.
+      parameters:
+        - name: moodTags
+          in: query
+          required: false
+          description: 반복 가능한 무드 태그. 예) moodTags=따뜻함&moodTags=차분함
+          style: form
+          explode: true
+          schema:
+            type: array
+            uniqueItems: true
+            maxItems: 10
+            items:
+              type: string
+              minLength: 1
+              maxLength: 30
+        - name: coverColors
+          in: query
+          required: false
+          description: 반복 가능한 표지 색상. 값 생성·허용 목록은 확정 필요
+          style: form
+          explode: true
+          schema:
+            type: array
+            uniqueItems: true
+            maxItems: 10
+            items:
+              type: string
+              minLength: 1
+              maxLength: 30
+        - name: author
+          in: query
+          required: false
+          description: 저자명
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+        - name: language
+          in: query
+          required: false
+          description: ISO 639-1 기반 언어 코드
+          schema:
+            type: string
+            pattern: "^[a-z]{2}(-[A-Z]{2})?$"
+          example: ko
+        - name: readingStatus
+          in: query
+          required: false
+          description: 독서 상태
+          schema:
+            $ref: "#/components/schemas/ReadingStatus"
+        - name: sortBy
+          in: query
+          required: false
+          description: 정렬 기준
+          schema:
+            type: string
+            enum: [TITLE, AUTHOR, CREATED_AT]
+            default: CREATED_AT
+        - name: sortOrder
+          in: query
+          required: false
+          description: 정렬 방향
+          schema:
+            type: string
+            enum: [ASC, DESC]
+            default: DESC
+        - name: page
+          in: query
+          required: false
+          description: 0부터 시작하는 페이지 번호
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          required: false
+          description: 페이지당 항목 수
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: 서재 도서 목록 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryBookPageResponse"
+              example:
+                books:
+                  - bookId: 123
+                    title: 살인자의 기억법
+                    author: 김영하
+                    moodTags: [차분함]
+                    language: ko
+                    progress: 45.0
+                page: 0
+                size: 20
+                totalElements: 1
+                totalPages: 1
+        "400":
+          $ref: "#/components/responses/InvalidFilterParameter"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/library/books/{bookId}:
+    parameters:
+      - $ref: "#/components/parameters/BookId"
+    get:
+      tags: [Library]
+      operationId: getLibraryBook
+      summary: 서재 책 상세 조회
+      description: 로그인 사용자의 서재에서 특정 도서의 상세 정보를 조회한다.
+      responses:
+        "200":
+          description: 서재 책 상세 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryBookDetailResponse"
+              example:
+                bookId: 123
+                bookNumber: 1
+                title: 어린 왕자
+                author: 앙투안 드 생텍쥐페리
+                isbn: "9788932917245"
+                publisher: 열린책들
+                totalPages: 160
+                genre: 소설
+                moodTags: [따뜻함, 감성적]
+                currentPage: 50
+                progress: 31.25
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/LibraryBookViewAccessDenied"
+        "404":
+          $ref: "#/components/responses/LibraryBookViewNotFound"
+
+    patch:
+      tags: [Library]
+      operationId: updateLibraryBook
+      summary: 서재 책 정보 수정
+      description: 로그인 사용자의 서재에 등록된 도서 정보를 부분 수정한다. 누락 필드는 기존 값을 유지한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLibraryBookRequest"
+            example:
+              bookNumber: 2
+              title: 어린 왕자
+              author: 생택쥐페리
+              isbn: "9788932917245"
+              publisher: 열린책들
+              publishedDate: "2015-10-20"
+              genre: 고전 소설
+              moodTags: [따뜻함, 사색적]
+              totalPages: 158
+      responses:
+        "200":
+          description: 서재 책 정보 수정 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateLibraryBookResponse"
+              example:
+                bookId: 123
+                title: 어린 왕자
+                genre: 고전 소설
+                moodTags: [따뜻함, 사색적]
+                totalPages: 158
+                updatedAt: "2026-08-17T01:10:00+09:00"
+        "400":
+          $ref: "#/components/responses/InvalidUpdateBookData"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/LibraryBookUpdateAccessDenied"
+        "404":
+          $ref: "#/components/responses/LibraryBookUpdateNotFound"
+
+    delete:
+      tags: [Library]
+      operationId: deleteLibraryBook
+      summary: 서재 책 삭제
+      description: 로그인 사용자의 개인 서재에서 지정한 책을 삭제한다.
+      responses:
+        "204":
+          description: 서재 책 삭제 성공. 응답 body 없음
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/LibraryBookDeleteAccessDenied"
+        "404":
+          $ref: "#/components/responses/LibraryBookDeleteNotFound"
+
+  /api/v1/library/books/{bookId}/progress:
+    parameters:
+      - $ref: "#/components/parameters/BookId"
+    patch:
+      tags: [Reading Progress]
+      operationId: updateReadingProgress
+      summary: 독서 진도 수정
+      description: |
+        현재/전체 페이지를 수정하고 진도율과 독서 상태를 서버에서 계산한다.
+        현재 페이지가 전체 페이지에 도달하면 COMPLETED로 변경한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateReadingProgressRequest"
+            example:
+              currentPage: 80
+              totalPages: 160
+      responses:
+        "200":
+          description: 독서 진도 수정 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateReadingProgressResponse"
+              example:
+                bookId: 123
+                currentPage: 80
+                totalPages: 160
+                progress: 50.0
+                readingStatus: READING
+                updatedAt: "2026-08-17T21:30:00+09:00"
+        "400":
+          $ref: "#/components/responses/InvalidPageValue"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/LibraryBookProgressAccessDenied"
+        "404":
+          $ref: "#/components/responses/LibraryBookProgressNotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 인증 서비스가 발급하고 Book Service가 검증하는 access token
+
+  parameters:
+    BookId:
+      name: bookId
+      in: path
+      required: true
+      description: 개인 서재 도서 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+      example: 123
+
+  schemas:
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          description: 클라이언트 분기용 안정적인 오류 코드
+        message:
+          type: string
+          minLength: 1
+          description: 사용자에게 표시 가능한 한국어 오류 메시지
+
+    MoodTags:
+      type: array
+      uniqueItems: true
+      maxItems: 10
+      items:
+        type: string
+        minLength: 1
+        maxLength: 30
+
+    ReadingStatus:
+      type: string
+      enum: [NOT_STARTED, READING, COMPLETED]
+
+    BookOcrResponse:
+      type: object
+      additionalProperties: false
+      required: [S3ImageUrl, extractedTitle, extractedAuthor, confidence]
+      properties:
+        S3ImageUrl:
+          type: string
+          format: uri
+          description: 제공된 계약과의 호환성을 위해 대문자 S3 이름을 유지한다.
+        extractedTitle:
+          type: string
+          minLength: 1
+          maxLength: 200
+        extractedAuthor:
+          type: string
+          minLength: 1
+          maxLength: 100
+        confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+
+    ExternalBook:
+      type: object
+      additionalProperties: false
+      required: [externalBookId, title, author, source]
+      properties:
+        externalBookId:
+          type: string
+          minLength: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        author:
+          type: string
+          minLength: 1
+          maxLength: 100
+        isbn:
+          type: string
+          pattern: "^(?:[0-9]{10}|[0-9]{13})$"
+        publisher:
+          type: string
+          maxLength: 100
+        publishedDate:
+          type: string
+          format: date
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 1
+        externalImageUrl:
+          type: string
+          format: uri
+        genre:
+          type: string
+          maxLength: 50
+        kdc:
+          type: string
+          maxLength: 20
+        source:
+          type: string
+          minLength: 1
+          maxLength: 50
+          example: NATIONAL_LIBRARY
+
+    BookSearchResponse:
+      type: object
+      additionalProperties: false
+      required: [books]
+      properties:
+        books:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExternalBook"
+
+    AiBookAnalysisRequest:
+      type: object
+      additionalProperties: false
+      required: [title, author]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        author:
+          type: string
+          minLength: 1
+          maxLength: 100
+        isbn:
+          type: string
+          pattern: "^(?:[0-9]{10}|[0-9]{13})$"
+        publisher:
+          type: string
+          maxLength: 100
+        publishedDate:
+          type: string
+          format: date
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 1
+        genre:
+          type: string
+          maxLength: 50
+        description:
+          type: string
+          maxLength: 5000
+        coverUrl:
+          type: string
+          format: uri
+
+    AiBookAnalysisResponse:
+      type: object
+      additionalProperties: false
+      required: [title, author, genre, moodTags, fallbackUsed]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        author:
+          type: string
+          minLength: 1
+          maxLength: 100
+        genre:
+          type: string
+          minLength: 1
+          maxLength: 50
+        moodTags:
+          $ref: "#/components/schemas/MoodTags"
+        fallbackUsed:
+          type: boolean
+
+    CreateLibraryBookRequest:
+      type: object
+      additionalProperties: false
+      required: [title, author, totalPages]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        author:
+          type: string
+          minLength: 1
+          maxLength: 100
+        isbn:
+          type: string
+          pattern: "^(?:[0-9]{10}|[0-9]{13})$"
+        publisher:
+          type: string
+          maxLength: 100
+        publishedDate:
+          type: string
+          format: date
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 1
+        genre:
+          type: string
+          maxLength: 50
+        moodTags:
+          $ref: "#/components/schemas/MoodTags"
+        coverUrl:
+          type: string
+          format: uri
+
+    CreateLibraryBookResponse:
+      type: object
+      additionalProperties: false
+      required: [bookId, title, author, currentPage, progress]
+      properties:
+        bookId:
+          type: integer
+          format: int64
+          minimum: 1
+        title:
+          type: string
+        author:
+          type: string
+        currentPage:
+          type: integer
+          format: int32
+          minimum: 0
+        progress:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+
+    LibraryBookSummary:
+      type: object
+      additionalProperties: false
+      required: [bookId, title, author, moodTags, language, progress]
+      properties:
+        bookId:
+          type: integer
+          format: int64
+          minimum: 1
+        title:
+          type: string
+        author:
+          type: string
+        moodTags:
+          $ref: "#/components/schemas/MoodTags"
+        language:
+          type: string
+          pattern: "^[a-z]{2}(-[A-Z]{2})?$"
+        progress:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+
+    LibraryBookPageResponse:
+      type: object
+      additionalProperties: false
+      required: [books, page, size, totalElements, totalPages]
+      properties:
+        books:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryBookSummary"
+        page:
+          type: integer
+          format: int32
+          minimum: 0
+        size:
+          type: integer
+          format: int32
+          minimum: 1
+        totalElements:
+          type: integer
+          format: int64
+          minimum: 0
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 0
+
+    LibraryBookDetailResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - bookId
+        - bookNumber
+        - title
+        - author
+        - totalPages
+        - moodTags
+        - currentPage
+        - progress
+      properties:
+        bookId:
+          type: integer
+          format: int64
+          minimum: 1
+        bookNumber:
+          type: integer
+          format: int32
+          minimum: 1
+        title:
+          type: string
+        author:
+          type: string
+        isbn:
+          type: string
+          pattern: "^(?:[0-9]{10}|[0-9]{13})$"
+        publisher:
+          type: string
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 1
+        genre:
+          type: string
+        moodTags:
+          $ref: "#/components/schemas/MoodTags"
+        currentPage:
+          type: integer
+          format: int32
+          minimum: 0
+        progress:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+
+    UpdateLibraryBookRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        bookNumber:
+          type: integer
+          format: int32
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        author:
+          type: string
+          minLength: 1
+          maxLength: 100
+        isbn:
+          type: string
+          pattern: "^(?:[0-9]{10}|[0-9]{13})$"
+        publisher:
+          type: string
+          minLength: 1
+          maxLength: 100
+        publishedDate:
+          type: string
+          format: date
+        genre:
+          type: string
+          minLength: 1
+          maxLength: 50
+        moodTags:
+          $ref: "#/components/schemas/MoodTags"
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 1
+
+    UpdateLibraryBookResponse:
+      type: object
+      additionalProperties: false
+      required: [bookId, title, genre, moodTags, totalPages, updatedAt]
+      properties:
+        bookId:
+          type: integer
+          format: int64
+          minimum: 1
+        title:
+          type: string
+        genre:
+          type: string
+        moodTags:
+          $ref: "#/components/schemas/MoodTags"
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
+
+    UpdateReadingProgressRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPage, totalPages]
+      properties:
+        currentPage:
+          type: integer
+          format: int32
+          minimum: 0
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 1
+      description: currentPage는 totalPages보다 클 수 없다.
+
+    UpdateReadingProgressResponse:
+      type: object
+      additionalProperties: false
+      required: [bookId, currentPage, totalPages, progress, readingStatus, updatedAt]
+      properties:
+        bookId:
+          type: integer
+          format: int64
+          minimum: 1
+        currentPage:
+          type: integer
+          format: int32
+          minimum: 0
+        totalPages:
+          type: integer
+          format: int32
+          minimum: 1
+        progress:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+        readingStatus:
+          $ref: "#/components/schemas/ReadingStatus"
+        updatedAt:
+          type: string
+          format: date-time
+
+  responses:
+    Unauthorized:
+      description: 인증 필요
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: UNAUTHORIZED
+            message: 인증이 필요합니다.
+
+    InvalidImageFile:
+      description: 지원하지 않거나 올바르지 않은 이미지
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: INVALID_IMAGE_FILE
+            message: 지원하지 않는 이미지 형식입니다.
+
+    BookOcrFailed:
+      description: 책 표지에서 제목 또는 저자를 인식하지 못함
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: BOOK_OCR_FAILED
+            message: 책 표지에서 제목 또는 저자를 인식하지 못했습니다.
+
+    OcrServiceError:
+      description: OCR 서비스 호출 오류
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: OCR_SERVICE_ERROR
+            message: OCR 서비스 호출 중 오류가 발생했습니다.
+
+    InvalidSearchParameter:
+      description: 제목과 저자 검색 조건이 모두 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: INVALID_SEARCH_PARAMETER
+            message: 제목 또는 저자 검색 조건이 필요합니다.
+
+    BookApiError:
+      description: 외부 도서 정보 API 호출 오류
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: BOOK_API_ERROR
+            message: 외부 도서 정보 조회 중 오류가 발생했습니다.
+
+    InvalidAiBookData:
+      description: AI 분석에 필요한 도서 정보 부족
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: INVALID_BOOK_DATA
+            message: AI 분석에 필요한 도서 정보가 부족합니다.
+
+    AiAnalysisFailed:
+      description: 도서 정보 분석 불가
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: AI_ANALYSIS_FAILED
+            message: 도서 정보를 분석할 수 없습니다.
+
+    BedrockServiceError:
+      description: Bedrock 서비스 호출 오류
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: BEDROCK_SERVICE_ERROR
+            message: AI 서비스 호출 중 오류가 발생했습니다.
+
+    InvalidCreateBookData:
+      description: 서재 등록 필수 도서 정보 누락
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: INVALID_BOOK_DATA
+            message: 필수 도서 정보가 누락되었습니다.
+
+    BookAlreadyRegistered:
+      description: 사용자 서재에 이미 등록된 도서
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: BOOK_ALREADY_REGISTERED
+            message: 이미 서재에 등록된 도서입니다.
+
+    InvalidFilterParameter:
+      description: 올바르지 않은 목록 필터 또는 정렬 조건
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: INVALID_FILTER_PARAMETER
+            message: 올바르지 않은 필터 또는 정렬 조건입니다.
+
+    LibraryBookViewAccessDenied:
+      description: 서재 도서 조회 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARY_BOOK_ACCESS_DENIED
+            message: 해당 도서에 접근할 권한이 없습니다.
+
+    LibraryBookViewNotFound:
+      description: 조회할 서재 도서 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARY_BOOK_NOT_FOUND
+            message: 서재에서 해당 도서를 찾을 수 없습니다.
+
+    InvalidUpdateBookData:
+      description: 올바르지 않은 도서 수정 정보
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: INVALID_BOOK_DATA
+            message: 올바르지 않은 도서 정보입니다.
+
+    LibraryBookUpdateAccessDenied:
+      description: 서재 도서 수정 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARY_BOOK_ACCESS_DENIED
+            message: 해당 도서를 수정할 권한이 없습니다.
+
+    LibraryBookUpdateNotFound:
+      description: 수정할 서재 도서 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARY_BOOK_NOT_FOUND
+            message: 수정할 도서를 찾을 수 없습니다.
+
+    LibraryBookDeleteAccessDenied:
+      description: 서재 도서 삭제 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARY_BOOK_ACCESS_DENIED
+            message: 해당 도서를 삭제할 권한이 없습니다.
+
+    LibraryBookDeleteNotFound:
+      description: 삭제할 서재 도서 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARY_BOOK_NOT_FOUND
+            message: 삭제할 도서를 찾을 수 없습니다.
+
+    InvalidPageValue:
+      description: 현재/전체 페이지 값이 도메인 규칙을 위반함
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: INVALID_PAGE_VALUE
+            message: 현재 페이지와 전체 페이지 값을 확인해야 합니다.
+
+    LibraryBookProgressAccessDenied:
+      description: 독서 진도 수정 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARY_BOOK_ACCESS_DENIED
+            message: 해당 도서의 독서 정보를 수정할 권한이 없습니다.
+
+    LibraryBookProgressNotFound:
+      description: 진도를 수정할 서재 도서 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARY_BOOK_NOT_FOUND
+            message: 서재에서 해당 도서를 찾을 수 없습니다.
