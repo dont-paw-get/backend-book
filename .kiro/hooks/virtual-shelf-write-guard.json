@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Virtual Shelf Write Guard",
+      "trigger": "PreToolUse",
+      "description": "쓰기 전에 적용 중인 소유 문서와 변경 산출물 누락을 점검합니다.",
+      "matcher": "write|fs_write|str_replace|fs_append",
+      "action": {
+        "type": "agent",
+        "prompt": "쓰기 전에 현재 적용된 steering의 단일 소유 문서를 확인하라. 변경 내용이 해당 기준과 충돌하거나 artifact-synchronization.md가 요구하는 관련 산출물이 누락되는 경우에만 구체적으로 지적하고, 문제가 없으면 작업을 계속하라."
+      }
+    }
+  ]
+}
