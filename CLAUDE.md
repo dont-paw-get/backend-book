@@ -7,8 +7,9 @@
 1. `.harness/HANDOFF.md` — 직전 세션이 어디서 멈췄는지
 2. `.harness/STATE.md` — 지금까지 무엇이 완료되었는지
 3. `.harness/ARCHITECTURE.md` — 기술 스택/구조 요약 (코드베이스 재탐색 최소화)
-4. `.harness/PLAN.md` — 제안·확정·진행 중인 계획
-5. 필요 시 `.harness/DECISIONS.md`(과거 결정 이유), `.harness/BACKLOG.md`(미해결 항목)
+4. `.harness/DOMAIN.md` — 업무 규칙(aggregate·불변식·중복 판정 등) 요약
+5. `.harness/PLAN.md` — 제안·확정·진행 중인 계획
+6. 필요 시 `.harness/DECISIONS.md`(과거 결정 이유), `.harness/BACKLOG.md`(미해결 항목)
 
 **문서별 책임 (중복 기록 금지 — 아래 표에 없는 문서에는 해당 내용을 쓰지 않는다):**
 
@@ -17,6 +18,7 @@
 | `HANDOFF.md` | 세션마다 무엇을 했는지 (append-only 서술형 로그) | 단계별 완료 요약(STATE 몫), 결정 이유(DECISIONS 몫) |
 | `STATE.md` | 지금까지 끝난 것의 단계 단위 요약 스냅샷 | 세션별 서술(HANDOFF 몫). 이슈 하나하나를 로그처럼 쌓지 않는다 — 단계가 끝나면 그 단계 한 줄로 갱신 |
 | `ARCHITECTURE.md` | 지금의 기술 스택/폴더 구조/컨벤션 (현재 상태) | 왜 그렇게 정했는지(DECISIONS 몫), 진행 상황(STATE 몫) |
+| `DOMAIN.md` | 업무 규칙 현재 상태 — aggregate가 소유하는 개념, 불변식, 상태 전이, 중복 판정 기준 | API wire 표현(openapi.yaml 몫), 구현 진행 상황(STATE 몫), 결정 이유(DECISIONS 몫) |
 | `DECISIONS.md` | 결정 내용과 이유의 역사(append-only) | 구현 여부/진행 상황(STATE 몫) |
 | `PLAN.md` | 아직 안 끝난 계획과 체크리스트만 | 완료된 항목(체크만 남기지 말고 STATE로 옮긴 뒤 제거) |
 | `BACKLOG.md` | 지금 하지 않지만 나중에 할 것(버그·기술부채·아이디어) | 진행 중인 계획(PLAN 몫) |
@@ -46,6 +48,7 @@ API wire 계약과 계약 결정은 `.harness`가 아니라 `docs/api/openapi.ya
 | --- | --- |
 | 개발 하네스 워크플로우, DB·테스트·브랜치 정책 | `AGENTS.md` |
 | 크로스 툴 인수인계·진행 상황·아키텍처 현황·계획·결정·백로그 | `.harness/*.md` |
+| 업무 규칙(도메인 aggregate·불변식·중복 판정 등) | `.harness/DOMAIN.md` |
 | API wire 계약 | `docs/api/openapi.yaml` |
 | API 문서 탐색·사용법 | `docs/api/README.md` |
 | API 계약 결정과 근거 | `docs/api/decisions/` |
@@ -56,6 +59,7 @@ API wire 계약과 계약 결정은 `.harness`가 아니라 `docs/api/openapi.ya
 - **DB·테스트·브랜치 정책 변경** (`AGENTS.md` 수정): `.harness/ARCHITECTURE.md`의 관련 서술, `.harness/DECISIONS.md`에 결정 이유 추가
 - **기술 스택·패키지 구조 변경**: `.harness/ARCHITECTURE.md`, 실제 `build.gradle`/`settings.gradle`, 관련 테스트 설정
 - **API endpoint·요청/응답 스키마 변경**: `docs/api/openapi.yaml`을 먼저 수정하고, 호환성이 깨지거나 정책 근거가 필요하면 `docs/api/decisions/`에 ADR 추가, Controller·DTO·계약 테스트를 함께 갱신
+- **업무 규칙 변경** (aggregate·불변식·상태 전이·중복 판정 등): `.harness/DOMAIN.md`를 갱신하고, 그 규칙이 API에 노출되어 있으면 `docs/api/openapi.yaml`·관련 ADR도 같은 작업에서 확인
 - **완료된 계획 항목**: `.harness/PLAN.md`에서 제거하고 `.harness/STATE.md`에 단계 한 줄로 반영 (위 "작업 워크플로우" 절차 그대로)
 - **README.md에 링크·안내가 걸린 파일을 이동·삭제·이름변경**: `README.md`의 해당 링크를 같은 작업에서 수정하거나 제거 (깨진 링크를 남기지 않는다)
 
