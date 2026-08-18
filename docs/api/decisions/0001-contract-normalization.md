@@ -24,5 +24,3 @@
 - 비표준 GET body 및 204 body 처리 차이에서 발생할 수 있는 호환 문제를 방지한다.
 - `S3ImageUrl`은 JSON naming convention과 다르지만 현재 호환성을 우선한다.
 
-## 후속 결정
-후속 정책은 해당 단일 소유 문서에서 관리한다. 서비스·연동 결정은 `.kiro/steering/architecture.md`, 업무 규칙은 `.kiro/steering/domain.md`, 최종 wire 표현은 `docs/api/openapi.yaml`에 반영한다.
