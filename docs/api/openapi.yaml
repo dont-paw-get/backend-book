@@ -365,6 +365,7 @@ paths:
               publishedDate: "2015-10-20"
               genre: 고전 소설
               moodTags: [따뜻함, 사색적]
+              language: ko
               totalPages: 158
       responses:
         "200":
@@ -375,9 +376,11 @@ paths:
                 $ref: "#/components/schemas/UpdateLibraryBookResponse"
               example:
                 bookId: 123
+                bookNumber: 2
                 title: 어린 왕자
                 genre: 고전 소설
                 moodTags: [따뜻함, 사색적]
+                language: ko
                 totalPages: 158
                 updatedAt: "2026-08-17T01:10:00+09:00"
         "400":
@@ -839,6 +842,9 @@ components:
         language:
           type: string
           pattern: "^[a-z]{2}(-[A-Z]{2})?$"
+        coverUrl:
+          type: string
+          format: uri
         totalPages:
           type: integer
           format: int32
@@ -847,11 +853,15 @@ components:
     UpdateLibraryBookResponse:
       type: object
       additionalProperties: false
-      required: [bookId, title, genre, moodTags, totalPages, updatedAt]
+      required: [bookId, bookNumber, title, genre, moodTags, language, totalPages, updatedAt]
       properties:
         bookId:
           type: integer
           format: int64
+          minimum: 1
+        bookNumber:
+          type: integer
+          format: int32
           minimum: 1
         title:
           type: string
@@ -859,6 +869,12 @@ components:
           type: string
         moodTags:
           $ref: "#/components/schemas/MoodTags"
+        language:
+          type: string
+          pattern: "^[a-z]{2}(-[A-Z]{2})?$"
+        coverUrl:
+          type: string
+          format: uri
         totalPages:
           type: integer
           format: int32
