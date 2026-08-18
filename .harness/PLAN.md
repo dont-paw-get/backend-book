@@ -16,6 +16,3 @@
 - [ ] `check`가 `test`와 `integrationTest`를 모두 실행하도록 연결
 - [ ] `RepositoryIntegrationTestSupport`(`@DataJpaTest` + Testcontainers), `IntegrationTestSupport`(`@SpringBootTest` + Testcontainers) 기반 클래스는 첫 Repository/전체 컨텍스트 테스트 작성 시점에 함께 생성
 
-## 기타
-
-- [ ] `.kiro/steering`에서 관리하던 product/domain/architecture 정책을 다시 문서화할지, `.harness`로 완전히 이전할지 결정

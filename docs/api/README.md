@@ -6,11 +6,12 @@
 - [`openapi.yaml`](./openapi.yaml): 유일한 API wire 계약
 - [`decisions/`](./decisions/): 계약 변경의 배경과 결정
 
-계약 내용이 충돌하면 `openapi.yaml`을 우선한다. 제품 범위는 `product.md`, 서비스 경계는 `architecture.md`, 업무 규칙은 `domain.md`, 테스트 방식은 `tdd.md`가 각각 소유한다.
+계약 내용이 충돌하면 `openapi.yaml`을 우선한다. 개발 하네스 워크플로우·DB·테스트·브랜치 정책은 루트 `AGENTS.md`, 서비스 경계·기술 스택 현황은 `.harness/ARCHITECTURE.md`가 소유한다.
 
 ## 사용
 - 백엔드 구현과 MockMvc 계약 테스트는 OpenAPI의 `operationId`, schema와 responses를 기준으로 한다.
 - 프론트엔드·BFF·다른 서비스는 OpenAPI로 client, mock 또는 타입을 생성할 수 있다.
 
 ## 변경
-현재 정규화의 근거는 [`0001-contract-normalization.md`](./decisions/0001-contract-normalization.md)를 참고한다.
+- [`0001-contract-normalization.md`](./decisions/0001-contract-normalization.md): 최초 계약 정규화 근거
+- [`0002-library-book-schema-fixes.md`](./decisions/0002-library-book-schema-fixes.md): 서재 도서 스키마 불일치 수정 근거
