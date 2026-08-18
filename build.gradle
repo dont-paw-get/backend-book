@@ -17,20 +17,56 @@ repositories {
 	mavenCentral()
 }
 
+sourceSets {
+	integrationTest {
+		compileClasspath += sourceSets.main.output + sourceSets.test.output
+		runtimeClasspath += sourceSets.main.output + sourceSets.test.output
+	}
+}
+
+configurations {
+	integrationTestImplementation.extendsFrom testImplementation
+	integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
+	integrationTestAnnotationProcessor.extendsFrom testAnnotationProcessor
+}
+
 dependencies {
-	implementation 'org.springframework.boot:spring-boot-h2console'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	implementation 'org.flywaydb:flyway-core'
+	implementation 'org.flywaydb:flyway-database-postgresql'
 	compileOnly 'org.projectlombok:lombok'
-	runtimeOnly 'com.h2database:h2'
+	runtimeOnly 'org.postgresql:postgresql'
 	annotationProcessor 'org.projectlombok:lombok'
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	testAnnotationProcessor 'org.projectlombok:lombok'
+	integrationTestImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	// io.spring.dependency-management가 spring-boot-dependencies의 testcontainers-bom 중첩 import를 반영하지 못하고,
+	// Spring Boot 4.1.0이 명시한 testcontainers.version(2.0.5)은 아직 Maven Central에 게시되지 않아
+	// Central에 실재하는 최신 버전을 직접 명시한다. Boot 업그레이드 시 함께 재검토할 것.
+	integrationTestImplementation 'org.testcontainers:junit-jupiter:1.21.3'
+	integrationTestImplementation 'org.testcontainers:postgresql:1.21.3'
+	integrationTestCompileOnly 'org.projectlombok:lombok'
+	integrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	integrationTestAnnotationProcessor 'org.projectlombok:lombok'
 }
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+tasks.register('integrationTest', Test) {
+	description = 'PostgreSQL Testcontainers 기반 통합 테스트'
+	group = 'verification'
+	testClassesDirs = sourceSets.integrationTest.output.classesDirs
+	classpath = sourceSets.integrationTest.runtimeClasspath
+	useJUnitPlatform()
+	shouldRunAfter test
+}
+
+tasks.named('check') {
+	dependsOn integrationTest
 }
