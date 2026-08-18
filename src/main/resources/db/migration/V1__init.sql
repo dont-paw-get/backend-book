@@ -1,0 +1,2 @@
+-- 초기 baseline. 아직 도메인 엔티티가 없어 스키마 변경 없음.
+-- 첫 테이블은 LibraryBook aggregate 구현 시 다음 migration에서 추가한다.

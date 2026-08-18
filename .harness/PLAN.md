@@ -2,20 +2,6 @@
 
 완료된 항목은 여기 체크만 남기지 않고 `STATE.md`로 옮긴 뒤 이 문서에서 제거한다.
 
-## PostgreSQL 전환
-
-- [ ] `build.gradle`에서 `com.h2database:h2`, `spring-boot-h2console` 제거
-- [ ] `org.postgresql:postgresql` (운영/개발), Testcontainers PostgreSQL 모듈 (`org.testcontainers:postgresql`, `org.testcontainers:junit-jupiter`) 추가
-- [ ] `application.yaml`에 datasource(PostgreSQL) 설정과 profile 분리 추가
-- [ ] Flyway 도입 여부와 최초 migration 파일 결정
-- [ ] `TestcontainersConfiguration` 빈 구성 (`withReuse(true)`, `src/test/resources/testcontainers.properties`)
-
-## Gradle 통합 테스트 태스크
-
-- [ ] `integrationTest` source set/task 구성 (`test`와 분리)
-- [ ] `check`가 `test`와 `integrationTest`를 모두 실행하도록 연결
-- [ ] `RepositoryIntegrationTestSupport`(`@DataJpaTest` + Testcontainers), `IntegrationTestSupport`(`@SpringBootTest` + Testcontainers) 기반 클래스는 첫 Repository/전체 컨텍스트 테스트 작성 시점에 함께 생성
-
 ## 인증 기반
 
 `openapi.yaml`의 모든 endpoint가 Bearer JWT 인증을 요구하므로(security: bearerAuth) 도메인 구현보다 먼저 확정한다.
@@ -36,7 +22,7 @@
 - [ ] `LibraryBook` aggregate 설계 — `memberId`, `bookId`, `bookNumber`, 확인된 메타데이터(title/author/isbn/publisher/publishedDate/genre/coverUrl), `moodTags`, `language`, `totalPages`, `currentPage`, `ReadingStatus`, 생성/수정 시각
 - [ ] 페이지·상태 불변식 구현: `totalPages > 0`, `0 <= currentPage <= totalPages`, `currentPage==0→NOT_STARTED`, `0<currentPage<totalPages→READING`, `currentPage==totalPages→COMPLETED`, 진도율 `currentPage/totalPages*100`, 전체 페이지를 기존 현재 페이지보다 작게 줄이는 것은 금지, 이전 페이지로의 이동(정정)은 허용
 - [ ] 사용자별 중복 판정: ISBN이 있으면 사용자별 ISBN 우선, 없으면 정규화된 제목+저자 보조 기준, 동시 등록 대비 DB unique 제약 병행
-- [ ] JPA Repository + `RepositoryIntegrationTestSupport` 기반 통합 테스트
+- [ ] JPA Repository + `RepositoryIntegrationTestSupport`(`@DataJpaTest` + Testcontainers, 아직 미생성 — 첫 Repository 테스트 작성 시 신설) 기반 통합 테스트
 
 ## Library CRUD API
 
