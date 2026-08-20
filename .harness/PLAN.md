@@ -2,27 +2,22 @@
 
 완료된 항목은 여기 체크만 남기지 않고 `STATE.md`로 옮긴 뒤 이 문서에서 제거한다.
 
-## LibraryBook 도메인/영속성
-
-`.harness/DOMAIN.md`에 정의된 업무 규칙을 구현 기준으로 삼는다(CLIAR-43에서 `genre`/`moodTags` 제거됨).
-
-- [ ] `LibraryBook` aggregate 설계 — `memberId`, `bookId`, `bookNumber`, 확인된 메타데이터(title/author/isbn/publisher/publishedDate/coverUrl), `totalPages`, `currentPage`, `ReadingStatus`, 생성/수정 시각
-- [ ] 페이지·상태 불변식 구현: `totalPages > 0`, `0 <= currentPage <= totalPages`, `currentPage==0→NOT_STARTED`, `0<currentPage<totalPages→READING`, `currentPage==totalPages→COMPLETED`, 진도율 `currentPage/totalPages*100`, 전체 페이지를 기존 현재 페이지보다 작게 줄이는 것은 금지, 이전 페이지로의 이동(정정)은 허용
-- [ ] 사용자별 중복 판정: ISBN이 있으면 사용자별 ISBN 우선, 없으면 정규화된 제목+저자 보조 기준, 동시 등록 대비 DB unique 제약 병행
-- [ ] JPA Repository + `RepositoryIntegrationTestSupport`(`@DataJpaTest` + Testcontainers, 아직 미생성 — 첫 Repository 테스트 작성 시 신설) 기반 통합 테스트
-
 ## Library CRUD API
 
-- [ ] `POST /api/v1/library/books`(`createLibraryBook`) — 등록, 중복 시 409
-- [ ] `GET /api/v1/library/books`(`getLibraryBooks`) — author/readingStatus 필터, sortBy(`TITLE`/`AUTHOR`/`CREATED_AT`/`PROGRESS`)/sortOrder, page/size 페이징 (XToMany fetch join 금지 원칙 준수)
+`LibraryBook`/`ShelfRank`/`LibraryBookRepository`(포트)는 CLIAR-31에서 구현 완료(`.harness/STATE.md` 참조). 서비스 계층은 `LibraryBookRepository` 포트에만 의존하고, JPA 파생 쿼리 메서드명(`LibraryBookJpaRepository`, package-private)은 몰라도 된다. 이 섹션은 그 위에 controller/service(유스케이스)를 배선한다.
+
+- [ ] `POST /api/v1/library/books`(`createLibraryBook`) — 등록, 중복 시 409. `shelfRank`는 `ShelfRank.after(마지막 shelfRank)`로 서버가 부여(서재가 비어 있으면 `ShelfRank.initial()`)
+- [ ] `GET /api/v1/library/books`(`getLibraryBooks`) — author 필터, sortBy(`SHELF_ORDER`/`TITLE`/`AUTHOR`/`CREATED_AT`/`PROGRESS`, 기본값 `SHELF_ORDER`)/sortOrder(기본값 `ASC`), page/size 페이징 (XToMany fetch join 금지 원칙 준수)
 - [ ] `GET /api/v1/library/books/{bookId}`(`getLibraryBook`) — 소유자 검증(403)·404 처리
-- [ ] `PATCH /api/v1/library/books/{bookId}`(`updateLibraryBook`) — 부분 수정, 누락 필드는 기존값 유지
+- [ ] `PATCH /api/v1/library/books/{bookId}`(`updateLibraryBook`) — 7개 필드 항상 전체 포함(ADR-0006, `Scrap.updateScrap`과 동일 방식), `isbn`/`publisher`/`publishedDate`/`coverUrl`는 `null`=삭제. `shelfRank`는 이 endpoint로 변경할 수 없다(아래 reorder 참조)
+- [ ] `PATCH /api/v1/library/books/{bookId}/order`(`reorderLibraryBook`) — `beforeBookId`/`afterBookId` 중 하나로 이웃 지정, `ShelfRank.between(...)`으로 새 값 계산·저장. 대상이 같은 서재에 없거나 자기 자신이면 400(`INVALID_REORDER_TARGET`). `ShelfRank.between`이 `ShelfRankExhaustedException`을 던지면 이 유스케이스가 `LibraryBookRepository.findShelfOrderedByRank` + `ShelfRank.rebalancedSequence`로 서재 전체를 재계산해 저장한 뒤 재시도 — 이 오케스트레이션 지점을 이 티켓에서 결정·구현한다
 - [ ] `DELETE /api/v1/library/books/{bookId}`(`deleteLibraryBook`) — 204
+- [ ] 도메인 계층의 `IllegalArgumentException`(불변식 위반)을 어떤 `common.exception` 타입(`InvalidBookDataException`/`InvalidPageValueException` 등)으로 번역할지는 이 서비스/컨트롤러 계층에서 결정 — LibraryBook 엔티티 자체는 HTTP 관심사와 분리되어 있음
 - [ ] 각 endpoint의 `operationId`·요청/응답 스키마·status를 기준으로 MockMvc 계약 테스트 작성
 
 ## Reading Progress API
 
-- [ ] `PATCH /api/v1/library/books/{bookId}/progress`(`updateReadingProgress`) — currentPage/totalPages 갱신, 진도율·상태 서버 계산, `currentPage > totalPages` 시 400(`INVALID_PAGE_VALUE`)
+- [ ] `PATCH /api/v1/library/books/{bookId}/progress`(`updateReadingProgress`) — currentPage/totalPages 갱신, 진도율 서버 계산, `currentPage > totalPages` 시 400(`INVALID_PAGE_VALUE`)
 
 ## Book Discovery API (외부 연동)
 
