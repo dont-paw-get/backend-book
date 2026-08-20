@@ -2,13 +2,6 @@
 
 완료된 항목은 여기 체크만 남기지 않고 `STATE.md`로 옮긴 뒤 이 문서에서 제거한다.
 
-## 공통 계약 인프라
-
-`com.chc.dpgb.common.ErrorResponse{code, message}`는 인증 기반(CLIAR-28) 작업에서 이미 만들어졌다 — 재사용한다.
-
-- [ ] `@RestControllerAdvice` 전역 예외 처리 — `openapi.yaml`의 각 `responses.*`(400/401/403/404/409/502)를 `ErrorResponse{code, message}`로 매핑하는 표준 예외 계층 설계. `com.chc.dpgb.security.JwtAuthenticationEntryPoint`(401 전용)와의 통합 여부도 이때 재검토
-- [ ] endpoint별 stable error code(`INVALID_BOOK_DATA`, `LIBRARY_BOOK_NOT_FOUND`, `SCRAP_NOT_FOUND`, `LIBRARIAN_NOT_FOUND` 등)를 예외 타입과 1:1로 연결
-
 ## LibraryBook 도메인/영속성
 
 `.harness/DOMAIN.md`에 정의된 업무 규칙을 구현 기준으로 삼는다(CLIAR-43에서 `genre`/`moodTags` 제거됨).
