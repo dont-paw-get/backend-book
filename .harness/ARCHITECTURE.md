@@ -6,11 +6,13 @@
 
 - Java 21, Spring Boot 4.1.0, Gradle Wrapper 9.5.1
 - Spring MVC, Spring Data JPA, Flyway(`flyway-core`, `flyway-database-postgresql`)
+- Spring Security OAuth2 Resource Server(`spring-boot-starter-oauth2-resource-server`) — JWT 검증, 인증 서비스는 AWS Cognito User Pool
 - 기준 패키지: `com.chc.dpgb`
 - DB: PostgreSQL (JDBC 드라이버 `org.postgresql:postgresql`, 스키마는 Flyway migration으로 관리, `spring.jpa.hibernate.ddl-auto: validate`)
 - Testcontainers(`org.testcontainers:junit-jupiter`, `org.testcontainers:postgresql`) — 버전은 `build.gradle` 주석 참조. `io.spring.dependency-management`가 Spring Boot BOM의 testcontainers-bom 중첩 import를 반영하지 못하고, Boot 4.1.0이 가리키는 testcontainers.version이 아직 Maven Central에 없어 실재하는 버전을 직접 고정했다. Boot 업그레이드 시 재검토.
 - Lombok (compile/annotation processor)
 - 실제 버전은 `build.gradle`과 Gradle Wrapper가 최종 기준
+- **Spring Boot 4.1.0 패키지 이동 주의**: Jackson은 `com.fasterxml.jackson.databind`가 아니라 `tools.jackson.databind`(Jackson 3)를 쓴다. `@WebMvcTest`는 `org.springframework.boot.webmvc.test.autoconfigure`(`spring-boot-webmvc-test` 모듈)에 있다. 예전 Boot 버전 예제 코드의 import 경로를 그대로 쓰면 컴파일 에러가 난다.
 
 ## 저장소 구조
 
@@ -18,10 +20,19 @@
 
 ```text
 src/main/java/com/chc/dpgb
-└─ DpgbApplication.java
+├─ DpgbApplication.java
+├─ common
+│  └─ ErrorResponse.java              # {code, message} — API 전역 에러 응답 포맷
+└─ security
+   ├─ SecurityConfig.java             # JwtDecoder/SecurityFilterChain/AuthenticationEntryPoint 빈
+   ├─ JwtAuthenticationEntryPoint.java
+   ├─ MemberIdResolver.java           # Jwt의 sub 클레임 → memberId 추출 단일 지점
+   └─ jwt
+      ├─ TokenUseValidator.java       # token_use == access
+      └─ ClientIdValidator.java       # client_id == 등록된 App Client
 
 src/main/resources
-├─ application.yaml          # 공통 설정 (JPA, Flyway 활성화)
+├─ application.yaml          # 공통 설정 (JPA, Flyway 활성화, OAuth2 Resource Server issuer-uri/app-client-id)
 ├─ application-local.yaml    # 로컬 프로필 — docker-compose Postgres 기본값
 ├─ application-prod.yaml     # 운영 프로필 — 전부 env var, 기본값 없음
 └─ db/migration
@@ -46,7 +57,7 @@ docker-compose.yml  # 로컬 개발용 PostgreSQL (POSTGRES_DB/USER/PASSWORD=dpg
 
 ## 테스트 구조
 
-- `test`: 단위 테스트(Domain/Application unit, `@WebMvcTest`). DB 없음. 현재 테스트 없음(NO-SOURCE).
+- `test`: 단위 테스트(Domain/Application unit, `@WebMvcTest`). DB 없음. 현재 `com.chc.dpgb.security` 패키지의 validator/`MemberIdResolver` 단위 테스트와 `SecurityConfigTest`(`@WebMvcTest` + 테스트 전용 nested 컨트롤러)가 있다.
 - `integrationTest`: PostgreSQL Testcontainers 기반 통합 테스트. Gradle에 구성 완료 — `./gradlew integrationTest`로 단독 실행, `./gradlew check`가 `test`와 함께 실행. Docker(Docker Desktop 등)가 로컬에 떠 있어야 한다.
 - 현재 유일한 통합 테스트는 `DpgbApplicationTests`(`IntegrationTestSupport` 상속, 빈 smoke test).
 

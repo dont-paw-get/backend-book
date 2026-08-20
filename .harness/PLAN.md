@@ -2,17 +2,11 @@
 
 완료된 항목은 여기 체크만 남기지 않고 `STATE.md`로 옮긴 뒤 이 문서에서 제거한다.
 
-## 인증 기반
-
-`openapi.yaml`의 모든 endpoint가 Bearer JWT 인증을 요구하므로(security: bearerAuth) 도메인 구현보다 먼저 확정한다.
-
-- [ ] Spring Security Resource Server(JWT) 설정 — 인증 서비스가 발급한 JWT 검증(서명/만료), 별도 로그인 endpoint는 Book Service에 없음
-- [ ] 인증 principal에서 `memberId`(소유자 식별자)를 얻는 공통 방법 확정 — 요청 body에 사용자 식별자를 받지 않는다는 ADR-0001 원칙 그대로
-- [ ] 인증 실패(401) 시 `ErrorResponse`(`code: UNAUTHORIZED`) 포맷으로 통일 응답
-
 ## 공통 계약 인프라
 
-- [ ] `@RestControllerAdvice` 전역 예외 처리 — `openapi.yaml`의 각 `responses.*`(400/401/403/404/409/422/502)를 `ErrorResponse{code, message}`로 매핑하는 표준 예외 계층 설계
+`com.chc.dpgb.common.ErrorResponse{code, message}`는 인증 기반(CLIAR-28) 작업에서 이미 만들어졌다 — 재사용한다.
+
+- [ ] `@RestControllerAdvice` 전역 예외 처리 — `openapi.yaml`의 각 `responses.*`(400/401/403/404/409/422/502)를 `ErrorResponse{code, message}`로 매핑하는 표준 예외 계층 설계. `com.chc.dpgb.security.JwtAuthenticationEntryPoint`(401 전용)와의 통합 여부도 이때 재검토
 - [ ] endpoint별 stable error code(`INVALID_BOOK_DATA`, `LIBRARY_BOOK_NOT_FOUND` 등)를 예외 타입과 1:1로 연결
 
 ## LibraryBook 도메인/영속성
