@@ -22,7 +22,16 @@
 src/main/java/com/chc/dpgb
 ├─ DpgbApplication.java
 ├─ common
-│  └─ ErrorResponse.java              # {code, message} — API 전역 에러 응답 포맷
+│  ├─ ErrorResponse.java              # {code, message} — API 전역 에러 응답 포맷
+│  └─ exception
+│     ├─ DomainException.java         # abstract, code() 추상 메서드 — 계층 최상위
+│     ├─ BadRequestException.java     # abstract, 400
+│     ├─ ForbiddenException.java      # abstract, 403
+│     ├─ NotFoundException.java       # abstract, 404
+│     ├─ ConflictException.java       # abstract, 409
+│     ├─ BadGatewayException.java     # abstract, 502
+│     ├─ GlobalExceptionHandler.java  # @RestControllerAdvice — 5개 abstract 타입 + 500 fallback(INTERNAL_ERROR)을 ErrorResponse로 매핑
+│     └─ (stable error code별 concrete 예외 13종 — InvalidSearchParameterException 등, openapi.yaml의 components.responses.* 기준)
 └─ security
    ├─ SecurityConfig.java             # JwtDecoder/SecurityFilterChain/AuthenticationEntryPoint 빈
    ├─ JwtAuthenticationEntryPoint.java
@@ -59,7 +68,7 @@ Book Service는 다른 Java 기반 MSA 서비스들과 PostgreSQL 인스턴스·
 
 ## 테스트 구조
 
-- `test`: 단위 테스트(Domain/Application unit, `@WebMvcTest`). DB 없음. 현재 `com.chc.dpgb.security` 패키지의 validator/`MemberIdResolver` 단위 테스트와 `SecurityConfigTest`(`@WebMvcTest` + 테스트 전용 nested 컨트롤러)가 있다.
+- `test`: 단위 테스트(Domain/Application unit, `@WebMvcTest`). DB 없음. 현재 `com.chc.dpgb.security` 패키지의 validator/`MemberIdResolver` 단위 테스트, `SecurityConfigTest`, `com.chc.dpgb.common.exception.GlobalExceptionHandlerTest`(전부 `@WebMvcTest` + 테스트 전용 nested 컨트롤러)가 있다.
 - `integrationTest`: PostgreSQL Testcontainers 기반 통합 테스트. Gradle에 구성 완료 — `./gradlew integrationTest`로 단독 실행, `./gradlew check`가 `test`와 함께 실행. Docker(Docker Desktop 등)가 로컬에 떠 있어야 한다.
 - 현재 유일한 통합 테스트는 `DpgbApplicationTests`(`IntegrationTestSupport` 상속, 빈 smoke test).
 

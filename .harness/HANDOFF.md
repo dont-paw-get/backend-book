@@ -73,3 +73,17 @@
 커밋 여부는 아직 사용자에게 확인받지 않음.
 
 다음 세션 시작 시: 이번 세션에서 만든 변경사항(API 계약 재정의 + DB 정책 반전 + 이미지 업로드 제거)이 커밋됐는지 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. 그다음 `.harness/PLAN.md`의 어느 섹션(공통 계약 인프라 / LibraryBook 도메인·영속성 / Scrap / Librarian 등)부터 구현할지, 또는 다른 서비스의 공유 DB schema 구조를 먼저 정할지 사용자에게 확인한다.
+
+## 2026-08-20 (계속): 공통 계약 인프라 구현 (CLIAR-29)
+
+이미 체크아웃되어 있던 `CLIAR-29-공통-계약-인프라` 브랜치(origin과 동기화된 상태, 이전 CLIAR-43 커밋 위에서 분기)에서 `.harness/PLAN.md`의 "공통 계약 인프라" 섹션을 구현했다. 먼저 `docs/api/openapi.yaml`의 `components.responses.*` 21개를 스캔해 stable error code가 여러 endpoint에서 재사용되는 패턴(예: `LIBRARY_BOOK_ACCESS_DENIED`는 조회/수정/삭제/진도수정 4곳 공용)을 확인하고, HTTP status별 abstract 예외 + stable code별 concrete 예외로 이루어진 2단 계층 설계를 `PLAN.md`에 먼저 적어 제시했다. 사용자에게 두 가지를 확인받았다: (1) 계약에 없는 500 fallback(`INTERNAL_ERROR`) 포함 여부 → 포함, (2) concrete 예외 13종을 한꺼번에 만들지 도메인 구현 시점마다 나눠 만들지 → 한꺼번에.
+
+구현: `com.chc.dpgb.common.exception` 패키지에 `DomainException`(abstract, `code()` 추상 메서드) → status별 abstract 5종(`BadRequestException`/`ForbiddenException`/`NotFoundException`/`ConflictException`/`BadGatewayException`) → stable code별 concrete 13종(`InvalidSearchParameterException`, `InvalidBookDataException`, `InvalidFilterParameterException`, `InvalidPageValueException`, `InvalidScrapDataException`, `LibraryBookAccessDeniedException`, `ScrapAccessDeniedException`, `LibraryBookNotFoundException`, `ScrapNotFoundException`, `LibrarianNotSelectedException`, `LibrarianNotFoundException`, `BookAlreadyRegisteredException`, `AladinApiException`). 각 concrete 예외는 `openapi.yaml` example의 기본 메시지를 갖는 무인자 생성자와, 메시지를 덮어쓰는 생성자를 함께 제공한다(같은 code라도 endpoint마다 예시 메시지가 다른 경우 — 예: `INVALID_BOOK_DATA`의 등록 vs 수정 — 를 대비). `GlobalExceptionHandler`(`@RestControllerAdvice`)가 5개 abstract 타입 + 예기치 못한 `Exception`(500, `INTERNAL_ERROR`)을 `ErrorResponse{code, message}`로 매핑한다. 401(`UNAUTHORIZED`)은 기존 `JwtAuthenticationEntryPoint`가 Spring Security 필터 단계에서 전담하므로 건드리지 않았다.
+
+`GlobalExceptionHandlerTest`(`@WebMvcTest`, 기존 `SecurityConfigTest`의 "테스트 전용 nested 컨트롤러 + `@Import`" 패턴 재사용, `SecurityConfig`를 함께 import하고 `.with(jwt())`로 인증 통과)로 6개 status(400/403/404/409/502/500) 매핑과 응답 body(`code`/`message`)를 검증했다. `./gradlew test` 전체 통과(신규 테스트 6개 포함) 확인.
+
+concrete 예외는 아직 LibraryBook/Scrap/Librarian 도메인 패키지가 없어 전부 `common.exception`에 배치했다 — 실제 aggregate 구현 시점에 해당 도메인 패키지로 옮길지는 그때 재검토하기로 `PLAN.md`/`ARCHITECTURE.md`에 남겨뒀다. `PLAN.md`에서 "공통 계약 인프라" 섹션을 제거하고 `STATE.md`에 단계 요약을 반영, `ARCHITECTURE.md`의 저장소 구조·테스트 구조 절에 새 패키지/테스트를 추가했다.
+
+커밋 여부는 아직 사용자에게 확인받지 않았다.
+
+다음 세션 시작 시: 이번 공통 계약 인프라 구현이 커밋됐는지 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. 그다음 `.harness/PLAN.md`의 다음 섹션("LibraryBook 도메인/영속성")을 계획할지 사용자에게 확인한다.
