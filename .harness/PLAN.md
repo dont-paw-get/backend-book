@@ -2,27 +2,11 @@
 
 완료된 항목은 여기 체크만 남기지 않고 `STATE.md`로 옮긴 뒤 이 문서에서 제거한다.
 
-## 인증 기반 (CLIAR-28)
-
-`openapi.yaml`의 모든 endpoint가 Bearer JWT 인증을 요구하므로(security: bearerAuth) 도메인 구현보다 먼저 확정한다.
-
-인증 서비스는 AWS Cognito(User Pool)로 확정. Book Service는 웹앱 하나(모바일도 웹뷰로 동일 웹앱)에서만 호출되므로 App Client는 사실상 1개 — client_id 검증까지 지금 같이 처리한다.
-
-- **issuer-uri 형식**: `https://cognito-idp.{region}.amazonaws.com/{userPoolId}` — 실제 값은 아직 없어 `AUTH_ISSUER_URI` env var로만 구성(기본값 없음, prod/local 동일)
-- **Cognito Access Token 특성**: `aud` 클레임이 없어 Spring의 `audiences` 검증 옵션은 사용하지 않는다. 대신 `token_use` 클레임으로 access token만 허용(ID Token 거부)하고, `client_id` 클레임으로 등록된 웹앱 App Client가 발급한 토큰인지 검증한다(`AUTH_APP_CLIENT_ID` env var, 기본값 없음).
-- **memberId**: Cognito `sub`는 불변 UUID라 회원 식별자로 적합 — `sub` 클레임 사용, 추출은 한 곳에 모은 유틸(`MemberIdResolver`)로 분리
-
-- [ ] `build.gradle`에 `spring-boot-starter-oauth2-resource-server`(implementation), `spring-security-test`(testImplementation) 추가
-- [ ] `application.yaml`에 `spring.security.oauth2.resourceserver.jwt.issuer-uri: ${AUTH_ISSUER_URI}`, 커스텀 프로퍼티 `book-service.security.cognito.app-client-id: ${AUTH_APP_CLIENT_ID}` 추가 (기본값 없음, prod/local 모두 env var로 주입)
-- [ ] `com.chc.dpgb.security.jwt.TokenUseValidator`, `ClientIdValidator`(둘 다 `OAuth2TokenValidator<Jwt>`) 구현 — 순수 함수라 단위 테스트로 결과(성공/실패) 검증
-- [ ] `com.chc.dpgb.security.SecurityConfig`: `JwtDecoder` 빈(issuer-uri 기반 + 위 두 validator를 `DelegatingOAuth2TokenValidator`로 결합), `SecurityFilterChain` 빈(모든 요청 인증 필수, stateless, CSRF 비활성화), `AuthenticationEntryPoint` 빈을 한 곳에서 구성
-- [ ] `com.chc.dpgb.security.MemberIdResolver`: `Jwt`에서 `sub` 클레임을 memberId로 추출하는 단일 지점 유틸 — 클레임 이름이 바뀌어도 이 한 곳만 수정
-- [ ] `com.chc.dpgb.security.JwtAuthenticationEntryPoint` + `com.chc.dpgb.common.ErrorResponse`: 인증 실패(401) 시 `ErrorResponse{code: UNAUTHORIZED, message: "인증이 필요합니다."}` JSON 응답 통일 — `@RestControllerAdvice`(공통 계약 인프라, 별도 섹션)가 아직 없으므로 이 EntryPoint는 최소 구현으로 두고, 공통 계약 인프라 작업 시 예외 계층과의 통합 여부 재검토
-- [ ] 검증 테스트: `TokenUseValidatorTest`/`ClientIdValidatorTest`(단위, 성공/실패 케이스), `MemberIdResolverTest`(단위), 아직 도메인 컨트롤러가 없으므로 테스트 클래스 안에 테스트 전용 `@RestController`를 두고 `@WebMvcTest` + `SecurityConfig` import로 (a) 토큰 없는 요청 401(`ErrorResponse` 포맷), (b) `spring-security-test`의 `jwt()` post-processor로 인증된 요청 200 + memberId 추출 확인. `JwtDecoder`는 `@MockitoBean`으로 대체해 실제 Cognito 네트워크 호출 없이 검증(issuer-uri 미설정 상태에서도 테스트 가능). 프로덕션 코드에는 테스트용 컨트롤러를 남기지 않는다. validator와 decoder의 실제 연동(발급된 진짜 Cognito 토큰 검증)은 실제 User Pool이 준비되기 전까지는 검증할 수 없음 — 이후 재검토.
-
 ## 공통 계약 인프라
 
-- [ ] `@RestControllerAdvice` 전역 예외 처리 — `openapi.yaml`의 각 `responses.*`(400/401/403/404/409/422/502)를 `ErrorResponse{code, message}`로 매핑하는 표준 예외 계층 설계
+`com.chc.dpgb.common.ErrorResponse{code, message}`는 인증 기반(CLIAR-28) 작업에서 이미 만들어졌다 — 재사용한다.
+
+- [ ] `@RestControllerAdvice` 전역 예외 처리 — `openapi.yaml`의 각 `responses.*`(400/401/403/404/409/422/502)를 `ErrorResponse{code, message}`로 매핑하는 표준 예외 계층 설계. `com.chc.dpgb.security.JwtAuthenticationEntryPoint`(401 전용)와의 통합 여부도 이때 재검토
 - [ ] endpoint별 stable error code(`INVALID_BOOK_DATA`, `LIBRARY_BOOK_NOT_FOUND` 등)를 예외 타입과 1:1로 연결
 
 ## LibraryBook 도메인/영속성

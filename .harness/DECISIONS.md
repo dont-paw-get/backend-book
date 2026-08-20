@@ -1,5 +1,15 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-19: 인증 기반 — AWS Cognito 대상 Resource Server 설정, 실제 Pool 없이도 기동 가능하게 구성
+
+- **인증 서비스 = AWS Cognito User Pool:** 사용자 확인. `issuer-uri` 형식은 `https://cognito-idp.{region}.amazonaws.com/{userPoolId}`.
+- **App Client가 사실상 1개:** Book Service는 웹앱 하나(모바일도 웹뷰로 동일 웹앱)에서만 호출된다는 사용자 확인에 따라, `client_id` 검증(웹앱 App Client 제한)을 인증 기반 작업에서 바로 포함시켰다. 다른 백엔드 MSA 컴포넌트가 M2M으로 직접 호출하는 시나리오는 지금 다루지 않는다 — 필요해지면 별도 검토.
+- **Cognito Access Token은 `aud` 클레임이 없다:** 표준 OIDC의 audience 검증(Spring `audiences` 옵션)을 쓸 수 없어, 대신 `token_use`(ID Token 거부) + `client_id`(등록된 App Client 제한) 커스텀 `OAuth2TokenValidator` 2개로 대체했다(`com.chc.dpgb.security.jwt.TokenUseValidator`, `ClientIdValidator`).
+- **memberId = `sub` 클레임:** Cognito `sub`는 불변 UUID라 회원 식별자로 적합하다고 판단, 추출 로직은 `com.chc.dpgb.security.MemberIdResolver` 한 곳에 모았다.
+- **`JwtDecoder` 빈과 그 주입 지점을 모두 `@Lazy`로 표시:** issuer-uri 기반 `JwtDecoder`는 생성 시점에 OIDC discovery 네트워크 호출을 한다. 실제 Cognito User Pool이 아직 없어 `AUTH_ISSUER_URI`를 비워둔 상태인데, `@Lazy`를 빈 정의에만 붙이면 `securityFilterChain` 빈이 생성자 인자로 `JwtDecoder`를 요구하면서 여전히 즉시 생성되는 문제가 있어(Spring이 `@Bean` 팩토리 메서드 파라미터 해석 시 지연 프록시를 자동으로 안 만듦), 주입 지점 파라미터에도 `@Lazy`를 추가로 붙여야 실제로 지연됐다. `./gradlew integrationTest`(`AUTH_ISSUER_URI` 미설정 상태)로 컨텍스트가 정상 기동하는 것을 확인했다. Book Discovery 어댑터와 같은 "자격 증명 없을 때 스텁으로 격리" 원칙의 연장선.
+- **Spring Boot 4.1.0의 패키지 이동 두 가지 확인:** (1) Jackson이 `com.fasterxml.jackson.databind`가 아니라 `tools.jackson.databind`(Jackson 3, `spring-boot-starter-jackson`이 끌어옴)로 바뀌었다. (2) `@WebMvcTest`가 `org.springframework.boot.test.autoconfigure.web.servlet`이 아니라 `org.springframework.boot.webmvc.test.autoconfigure`(`spring-boot-webmvc-test` 모듈)로 이동했다. `ARCHITECTURE.md` 기술 스택에 반영.
+- **`@WebMvcTest(controllers = X.class)`만으로는 테스트 클래스 내부 nested `@RestController`가 실제로 등록되지 않았다:** 원인은 확정하지 못했으나(Boot 4.1의 컴포넌트 스캔 경계 변경 추정), `@Import({SecurityConfig.class, X.class})`로 nested 컨트롤러를 명시적으로 같이 import해서 우회했다. 이후 도메인 컨트롤러가 생기면 이 패턴이 여전히 필요한지 재확인.
+
 ## 2026-08-18: PostgreSQL 전환 — Flyway 채택, `integrationTest` 태스크·기반 클래스 동시 구성
 
 - **Flyway 채택:** `spring.jpa.hibernate.ddl-auto`를 `validate`로 고정하고 스키마 변경은 Flyway migration(`src/main/resources/db/migration`)으로만 한다. 이유: 운영 DB 스키마를 Hibernate 자동 생성에 맡기지 않고 명시적 이력으로 남기는 편이 이 팀의 ADR 중심 작업 방식(`docs/api/decisions/`)과 일관된다. 아직 도메인 엔티티가 없어 최초 `V1__init.sql`은 빈 baseline이며, 첫 테이블은 `LibraryBook` aggregate 구현과 함께 다음 migration에서 추가한다.

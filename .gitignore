@@ -35,3 +35,6 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### 수집 스크립트 산출물 ###
+/data/
