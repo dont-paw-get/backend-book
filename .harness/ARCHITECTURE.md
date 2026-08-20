@@ -5,12 +5,12 @@
 ## 기술 스택
 
 - Java 21, Spring Boot 4.1.0, Gradle Wrapper 9.5.1
-- Spring MVC, Spring Data JPA, Flyway(`flyway-core`, `flyway-database-postgresql`)
+- Spring MVC, Spring Data JPA, Flyway(`flyway-core`, `flyway-database-postgresql` + Boot autoconfigure를 가져오는 `spring-boot-starter-flyway` — 이 starter 없이는 `FlywayAutoConfiguration`이 로드되지 않아 마이그레이션이 자동 실행되지 않는다, CLIAR-31에서 발견)
 - Spring Security OAuth2 Resource Server(`spring-boot-starter-oauth2-resource-server`) — JWT 검증, 인증 서비스는 AWS Cognito User Pool
 - 기준 패키지: `com.chc.dpgb`
 - DB: PostgreSQL (JDBC 드라이버 `org.postgresql:postgresql`, 스키마는 Flyway migration으로 관리, `spring.jpa.hibernate.ddl-auto: validate`)
 - Testcontainers(`org.testcontainers:junit-jupiter`, `org.testcontainers:postgresql`) — 버전은 `build.gradle` 주석 참조. `io.spring.dependency-management`가 Spring Boot BOM의 testcontainers-bom 중첩 import를 반영하지 못하고, Boot 4.1.0이 가리키는 testcontainers.version이 아직 Maven Central에 없어 실재하는 버전을 직접 고정했다. Boot 업그레이드 시 재검토.
-- Lombok (compile/annotation processor)
+- Lombok (compile/annotation processor) — entity getter는 `@Getter`로 생성(예: `LibraryBook`), setter는 쓰지 않고 불변식이 있는 도메인 메서드로만 상태를 바꾼다
 - 실제 버전은 `build.gradle`과 Gradle Wrapper가 최종 기준
 - **Spring Boot 4.1.0 패키지 이동 주의**: Jackson은 `com.fasterxml.jackson.databind`가 아니라 `tools.jackson.databind`(Jackson 3)를 쓴다. `@WebMvcTest`는 `org.springframework.boot.webmvc.test.autoconfigure`(`spring-boot-webmvc-test` 모듈)에 있다. 예전 Boot 버전 예제 코드의 import 경로를 그대로 쓰면 컴파일 에러가 난다.
 
@@ -32,6 +32,13 @@ src/main/java/com/chc/dpgb
 │     ├─ BadGatewayException.java     # abstract, 502
 │     ├─ GlobalExceptionHandler.java  # @RestControllerAdvice — 5개 abstract 타입 + 500 fallback(INTERNAL_ERROR)을 ErrorResponse로 매핑
 │     └─ (stable error code별 concrete 예외 13종 — InvalidSearchParameterException 등, openapi.yaml의 components.responses.* 기준)
+├─ library
+│  ├─ LibraryBook.java                   # aggregate root(JPA entity) — register/updateMetadata/updateProgress/changeShelfRank에 불변식 캡슐화
+│  ├─ LibraryBookRepository.java         # 포트(순수 인터페이스, Spring Data 비의존) — 서비스 계층이 의존하는 도메인 메서드명
+│  ├─ LibraryBookJpaRepository.java      # Spring Data JPA 인터페이스(package-private) — 파생 쿼리 메서드명, 포트 구현체 내부에서만 사용
+│  ├─ LibraryBookRepositoryJpaAdapter.java  # @Repository, LibraryBookRepository 구현 — LibraryBookJpaRepository로 위임
+│  ├─ ShelfRank.java                     # LexoRank pure 유틸(Spring 비의존) — initial/before/after/between/rebalancedSequence
+│  └─ ShelfRankExhaustedException.java   # 키 공간 소진 내부 신호(API 미노출) — rebalance 트리거용
 └─ security
    ├─ SecurityConfig.java             # JwtDecoder/SecurityFilterChain/AuthenticationEntryPoint 빈
    ├─ JwtAuthenticationEntryPoint.java
@@ -45,20 +52,27 @@ src/main/resources
 ├─ application-local.yaml    # 로컬 프로필 — docker-compose Postgres 기본값
 ├─ application-prod.yaml     # 운영 프로필 — 전부 env var, 기본값 없음
 └─ db/migration
-   └─ V1__init.sql           # baseline (아직 스키마 없음)
+   ├─ V1__init.sql                     # baseline (빈 마이그레이션)
+   └─ V2__create_library_book.sql      # library_book 테이블 + unique 제약(member_id+shelf_rank, member_id+isbn partial — isbn 없는 도서는 중복판정 안 함, ADR-0007)
+
+src/test/java/com/chc/dpgb
+├─ common/exception/GlobalExceptionHandlerTest.java
+├─ library/ShelfRankTest.java
+├─ library/LibraryBookTest.java
+└─ security/...  # validator/MemberIdResolver 단위 테스트, SecurityConfigTest
 
 src/integrationTest/java/com/chc/dpgb
-├─ TestcontainersConfiguration.java  # @TestConfiguration, PostgreSQLContainer + @ServiceConnection, withReuse(true)
-├─ IntegrationTestSupport.java       # @SpringBootTest + TestcontainersConfiguration import
-└─ DpgbApplicationTests.java         # IntegrationTestSupport 상속 (smoke test)
+├─ TestcontainersConfiguration.java       # @TestConfiguration, PostgreSQLContainer + @ServiceConnection, withReuse(true)
+├─ IntegrationTestSupport.java            # @SpringBootTest + TestcontainersConfiguration import
+├─ RepositoryIntegrationTestSupport.java  # @DataJpaTest + AutoConfigureTestDatabase(NONE) + @ImportAutoConfiguration(FlywayAutoConfiguration) + TestcontainersConfiguration import
+├─ DpgbApplicationTests.java              # IntegrationTestSupport 상속 (smoke test)
+└─ library/LibraryBookRepositoryTest.java # RepositoryIntegrationTestSupport 상속 — 저장/조회, unique 제약, 소유권 스코프
 
 src/integrationTest/resources
 └─ testcontainers.properties  # testcontainers.reuse.enable=true
 
 docker-compose.yml  # 로컬 개발용 PostgreSQL (POSTGRES_DB/USER/PASSWORD=dpgb)
 ```
-
-`src/test`에는 아직 단위 테스트가 없다(`./gradlew test`는 NO-SOURCE로 통과). `RepositoryIntegrationTestSupport`(`@DataJpaTest` + Testcontainers)는 첫 Repository 테스트 작성 시점에 `src/integrationTest`에 신설한다.
 
 ## 서비스 경계
 
@@ -68,9 +82,10 @@ Book Service는 다른 Java 기반 MSA 서비스들과 PostgreSQL 인스턴스·
 
 ## 테스트 구조
 
-- `test`: 단위 테스트(Domain/Application unit, `@WebMvcTest`). DB 없음. 현재 `com.chc.dpgb.security` 패키지의 validator/`MemberIdResolver` 단위 테스트, `SecurityConfigTest`, `com.chc.dpgb.common.exception.GlobalExceptionHandlerTest`(전부 `@WebMvcTest` + 테스트 전용 nested 컨트롤러)가 있다.
+- `test`: 단위 테스트. DB 없음. `com.chc.dpgb.security` 패키지의 validator/`MemberIdResolver` 단위 테스트와 `SecurityConfigTest`/`GlobalExceptionHandlerTest`(`@WebMvcTest` + 테스트 전용 nested 컨트롤러), `com.chc.dpgb.library`의 `ShelfRankTest`/`LibraryBookTest`(Domain unit, Spring 컨텍스트 없음)가 있다.
 - `integrationTest`: PostgreSQL Testcontainers 기반 통합 테스트. Gradle에 구성 완료 — `./gradlew integrationTest`로 단독 실행, `./gradlew check`가 `test`와 함께 실행. Docker(Docker Desktop 등)가 로컬에 떠 있어야 한다.
-- 현재 유일한 통합 테스트는 `DpgbApplicationTests`(`IntegrationTestSupport` 상속, 빈 smoke test).
+- `RepositoryIntegrationTestSupport`(`@DataJpaTest`)가 CLIAR-31에서 처음 만들어졌다. `@DataJpaTest`의 큐레이션된 autoconfiguration 목록은 Flyway를 포함하지 않으므로 `@ImportAutoConfiguration(FlywayAutoConfiguration.class)`를 명시적으로 추가해야 `ddl-auto: validate`가 마이그레이션된 실제 스키마를 검증한다(`.harness/DECISIONS.md` 참조). 새 `*RepositoryImpl`을 추가할 때 이 기반 클래스를 상속한다.
+- 통합 테스트: `DpgbApplicationTests`(`IntegrationTestSupport` 상속, 빈 smoke test), `LibraryBookRepositoryTest`(`RepositoryIntegrationTestSupport` 상속).
 
 ## API 문서
 

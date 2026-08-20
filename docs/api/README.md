@@ -16,3 +16,7 @@
 - [`0001-contract-normalization.md`](./decisions/0001-contract-normalization.md): 최초 계약 정규화 근거
 - [`0002-library-book-schema-fixes.md`](./decisions/0002-library-book-schema-fixes.md): 서재 도서 스키마 불일치 수정 근거
 - [`0003-scope-narrowing-and-new-resources.md`](./decisions/0003-scope-narrowing-and-new-resources.md): 장르/무드/`language` 제거, 알라딘 단일 소스화, OCR/AI 분석 삭제, 스크랩·동물 사서 추가, 이미지 파일 업로드 기능 제외 근거
+- [`0004-shelf-rank-lexorank-ordering.md`](./decisions/0004-shelf-rank-lexorank-ordering.md): `bookNumber`(정수)를 LexoRank 기반 `shelfRank`(문자열)로 재설계, 전용 재정렬 endpoint 신설 근거
+- [`0005-remove-reading-status.md`](./decisions/0005-remove-reading-status.md): `ReadingStatus`(`NOT_STARTED`/`READING`/`COMPLETED`) 필드·필터 전면 제거 근거
+- [`0006-update-library-book-full-payload.md`](./decisions/0006-update-library-book-full-payload.md): `updateLibraryBook`을 부분 수정에서 `Scrap.updateScrap`과 동일한 전체 필드 포함(`null`=삭제) 방식으로 통일한 근거
+- [`0007-drop-title-author-duplicate-check.md`](./decisions/0007-drop-title-author-duplicate-check.md): ISBN 없는 도서의 제목·저자 기반 중복 판정 제거 근거(ISBN 유일성 판정만 남김)

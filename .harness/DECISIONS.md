@@ -1,5 +1,13 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-20: `spring-boot-starter-flyway` 누락 발견 및 추가 (CLIAR-31)
+
+- **문제:** LibraryBook 도메인/영속성(CLIAR-31) 구현으로 이 저장소 최초의 `@Entity`(`LibraryBook`)와 Flyway migration(`V2__create_library_book.sql`)을 추가하자, `RepositoryIntegrationTestSupport`(`@DataJpaTest`)와 `@SpringBootTest`(`IntegrationTestSupport`) 양쪽에서 Hibernate가 `ddl-auto: validate` 단계에서 `missing table [library_book]`로 실패했다.
+- **원인:** CLIAR-26에서 PostgreSQL/Flyway를 도입할 때 `org.flywaydb:flyway-core`/`flyway-database-postgresql`(순수 Flyway 라이브러리)만 추가했고, Spring Boot 4.1의 autoconfigure 모듈(`org.springframework.boot:spring-boot-flyway`, `FlywayAutoConfiguration` 포함)은 별도 `spring-boot-starter-flyway`로만 제공된다는 점을 놓쳤다. 그 결과 Flyway가 앱 기동 시 한 번도 자동 실행되지 않았지만, `V1__init.sql`이 빈 baseline이고 엔티티가 없어 검증할 테이블이 없었던 탓에 CLIAR-26 당시의 `./gradlew integrationTest` 스모크 테스트는 이 결함을 드러내지 못했다.
+- **조치:** `build.gradle`에 `implementation 'org.springframework.boot:spring-boot-starter-flyway'`를 추가했다. 또한 `@DataJpaTest`의 큐레이션된 autoconfiguration 목록(`DataJpaRepositoriesAutoConfiguration`, `HibernateJpaAutoConfiguration`만 포함) 자체가 Flyway를 배제하므로, `RepositoryIntegrationTestSupport`에 `@ImportAutoConfiguration(FlywayAutoConfiguration.class)`를 명시적으로 추가했다(`@SpringBootTest` 기반 `IntegrationTestSupport`는 전체 autoconfiguration을 로드하므로 이 문제가 없다).
+- **검증:** `./gradlew test`/`integrationTest`/`check` 모두 통과, `LibraryBookRepositoryTest`(unique 제약 위반 포함)로 실제 스키마 생성을 확인했다.
+- 영향받은 문서: `.harness/ARCHITECTURE.md`(기술 스택·저장소 구조), `.harness/STATE.md`.
+
 ## 2026-08-20: DB 정책 반전 — Java MSA 서비스 전체가 PostgreSQL 하나를 공유, 직접 JOIN 허용 (CLIAR-43)
 
 - **기존 결정 반전:** 2026-08-18에 "Book Service와 Python RAG Service는 각자 PostgreSQL을 소유하고 DB를 직접 공유하지 않는다"고 결정했었다. 사용자가 "MSA로 서버는 여러 개지만 RDB는 하나만 사용해서 각 서비스가 원하는 데이터를 조인해서 사용하기로 했다"고 명시적으로 방향을 바꿔, Java 기반 MSA 서비스 전체가 PostgreSQL 인스턴스·데이터베이스 하나를 공유하고 서로의 schema를 직접 JOIN할 수 있도록 정책을 바꿨다.

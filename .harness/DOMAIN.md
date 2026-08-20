@@ -13,7 +13,7 @@
 - 알라딘 API 검색 결과(또는 검색 결과가 없어 사용자가 직접 입력한 값 — 폴백)는 사용자가 서재 등록을 확정하기 전까지는 후보 데이터다.
 - 사용자가 최종 확인해 등록을 요청하는 시점이 LibraryBook 생성 경계다.
 - 사용자가 확정한 값은 이후 외부 도서 API 재조회로 자동 덮어쓰지 않는다.
-- 알라딘 응답의 `author`는 "세네카 (지은이), 하와이 대저택 (편역)"처럼 역할 라벨이 붙은 결합 문자열이다. 검색 응답을 만드는 시점에 서버가 "(지은이)"/"(옮긴이)"/"(편역)" 등 역할 라벨을 제거하고 이름만 남긴 뒤 여럿이면 쉼표로 구분해 반환한다 — 이후 서재 저자 필터·정렬·중복 판정(정규화된 제목+저자)은 이 정리된 이름을 기준으로 한다.
+- 알라딘 응답의 `author`는 "세네카 (지은이), 하와이 대저택 (편역)"처럼 역할 라벨이 붙은 결합 문자열이다. 검색 응답을 만드는 시점에 서버가 "(지은이)"/"(옮긴이)"/"(편역)" 등 역할 라벨을 제거하고 이름만 남긴 뒤 여럿이면 쉼표로 구분해 반환한다 — 이후 서재 저자 필터·정렬은 이 정리된 이름을 기준으로 한다.
 - `totalPages`는 알라딘 API가 대부분의 도서에서 제공하지 않는다. 검색 결과에 없으면 사용자가 서재 등록 시 직접 입력해야 하는 것이 예외가 아니라 일반적인 경로다.
 
 ## LibraryBook aggregate
@@ -22,14 +22,28 @@
 
 - 소유자 식별자 `memberId`(요청 body가 아니라 인증 principal에서 얻는다)
 - 서버 발급 식별자 `bookId`
-- 사용자 서재 내 순서 `bookNumber` (등록 시점에 서버가 부여하고 등록 응답에 포함한다)
+- 사용자 서재 내 순서 `shelfRank` (LexoRank 방식의 불투명한 문자열 순서 키, 등록 시점에 서버가 맨 뒤 순서로 부여하고 등록 응답에 포함한다)
 - 확인된 책 메타데이터: `title`, `author`, `isbn`, `publisher`, `publishedDate`, `coverUrl`
-- `totalPages`, `currentPage`, `ReadingStatus`
+- `totalPages`, `currentPage`
 - 생성·수정 시각
 
 모든 조회와 변경은 aggregate 소유자(`memberId`) 기준으로 수행한다.
 
 `coverUrl`은 등록(`createLibraryBook`)과 수정(`updateLibraryBook`) 두 경로로만 갱신된다. 값은 문자열(URL)이며, 알라딘 검색 결과의 표지 URL을 그대로 쓰거나 사용자가 다른 이미지 URL을 직접 입력한다. 사용자가 직접 촬영한 이미지 파일을 업로드해 저장(S3 등)하는 기능은 이 저장소 범위 밖이다 — 필요해지면 파일 저장을 담당할 별도 컴포넌트/서비스와 함께 재설계한다.
+
+### `updateLibraryBook` 수정 방식 (ADR-0006)
+
+`updateLibraryBook`은 부분 수정이 아니라 `title`/`author`/`isbn`/`publisher`/`publishedDate`/`coverUrl`/`totalPages` 7개 필드를 **항상 모두 포함**해야 하는 계약이다(`Scrap.updateScrap`과 동일한 방식). `isbn`/`publisher`/`publishedDate`/`coverUrl`는 nullable 필드라 `null`을 보내면 그 값을 삭제하고, 값을 보내면 교체한다. `title`/`author`/`totalPages`는 aggregate의 필수 불변값이라 `null`을 허용하지 않는다.
+
+### `shelfRank` (서재 내 순서, ADR-0004)
+
+- `shelfRank`는 LexoRank 방식의 불투명한 문자열 순서 키다. 오름차순 문자열(사전식) 비교가 곧 서재 진열 순서이며, 값 자체는 사용자·클라이언트에게 아무 의미를 갖지 않는다.
+- 사용자별(`memberId`)로 유일해야 한다 — 동시 등록·재정렬에도 중복이 생기지 않도록 DB unique 제약(`memberId`, `shelfRank`)을 함께 사용한다.
+- 등록(`createLibraryBook`) 시점에 서버가 그 사용자 서재의 현재 마지막 `shelfRank`보다 뒤에 오는 값을 자동 부여한다(맨 뒤에 추가). 서재가 비어 있으면 기본 시작 값을 부여한다.
+- 순서 변경은 오직 전용 API(`reorderLibraryBook`, `PATCH /api/v1/library/books/{bookId}/order`)로만 한다 — `updateLibraryBook`(PATCH 본문)으로는 `shelfRank`를 바꿀 수 없다. 클라이언트는 "이 책을 어떤 책의 앞/뒤로 옮겨줘"라고만 요청하고(`beforeBookId`/`afterBookId` 중 정확히 하나), 서버가 그 두 이웃 사이에 들어갈 새 `shelfRank`를 계산해 저장한다.
+- 재정렬 대상(`beforeBookId`/`afterBookId`)은 같은 사용자 서재에 속해야 하고, 옮기려는 책 자신을 지정할 수 없다 — 위반 시 400(`INVALID_REORDER_TARGET`).
+- 두 이웃 `shelfRank` 사이에 더 끼워넣을 문자열 여유가 없어지면(반복 삽입으로 키 공간이 소진된 극단적 경우) 서버가 해당 사용자 서재 전체의 `shelfRank`를 넓은 간격으로 재계산(rebalance)한다. 이 재계산은 클라이언트에 노출되는 API가 아니라 서버 내부 유지보수 동작이다.
+- `GET /api/v1/library/books`의 `sortBy=SHELF_ORDER`(기본값)는 `shelfRank` 오름차순(`sortOrder` 기본값 `ASC`)이 자연스러운 진열 순서다. `LibraryBookSummary`에도 `shelfRank`가 노출된다.
 
 ## Scrap aggregate
 
@@ -58,33 +72,50 @@
 - 존재하지 않는 `librarianId`는 선택할 수 없다(404).
 - 아직 대표 사서를 선택하지 않은 회원의 조회는 404로 응답한다 — 선택을 강제로 기본값 지정하지 않고 미선택 상태를 명시적으로 구분한다.
 
-## 페이지와 독서 상태
+## 페이지와 진도율 (ADR-0005 반영)
 
 - `totalPages > 0`
 - `0 <= currentPage <= totalPages`
-- `currentPage == 0` → `NOT_STARTED`
-- `0 < currentPage < totalPages` → `READING`
-- `currentPage == totalPages` → `COMPLETED`
 - 진도율은 서버가 `currentPage / totalPages * 100`으로 계산한다.
 - 전체 페이지를 기존 현재 페이지보다 작게 줄일 수 없다.
 - 이전 페이지로의 이동은 사용자의 위치 정정으로 허용한다.
+- `ReadingStatus`(`NOT_STARTED`/`READING`/`COMPLETED`)는 ADR-0005로 제거했다 — 진행 상태는 `progress`(진도율)만으로 표현하고, 별도 상태 필드나 필터는 두지 않는다.
 
-## 중복
+## 중복 (ADR-0007 반영)
 
 - 중복은 사용자별로 판정한다. 다른 사용자는 같은 책을 각각 등록할 수 있다.
-- ISBN이 있으면 사용자별 ISBN을 우선 기준으로 사용한다.
-- ISBN이 없으면 정규화한 제목과 저자 조합을 보조 기준으로 검토한다.
-- 동시 등록에서도 중복이 생기지 않도록 저장소 제약(DB unique constraint)을 함께 사용한다.
+- ISBN이 있으면 사용자별 ISBN 기준으로 중복을 판정한다 — 같은 사용자가 같은 ISBN을 두 번 등록할 수 없다.
+- ISBN이 없으면 중복을 판정하지 않는다 — 같은 사용자가 제목·저자가 같은 책을 여러 번 등록해도 막지 않는다. 다른 책이어도 제목·저자가 우연히 같을 수 있어, 그 판단은 서버가 강제하지 않고 사용자 자율에 맡긴다.
+- 동시 등록에서도 ISBN 중복이 생기지 않도록 저장소 제약(DB unique constraint)을 함께 사용한다.
 
 ## 결정된 사항 (ADR-0002 반영)
 
 - `coverUrl`은 등록 시점뿐 아니라 이후 수정(PATCH)으로도 변경할 수 있다.
-- `bookNumber`는 등록 응답 시점부터 클라이언트에 노출된다.
+- `shelfRank`는 등록 응답 시점부터 클라이언트에 노출된다.
+
+## 결정된 사항 (ADR-0004 반영)
+
+- `bookNumber`(정수 순번)를 `shelfRank`(LexoRank 문자열 키)로 대체했다. 재정렬 시 서버가 이동한 책 하나만 갱신하면 되고, 사용자별 유일성은 DB unique 제약으로 보장한다.
+- 재정렬은 `updateLibraryBook`이 아니라 전용 `reorderLibraryBook` API로 분리했다 — 클라이언트가 유효하지 않은 순서 키를 직접 계산해 보낼 위험을 없앤다.
+- 목록 조회(`getLibraryBooks`)의 기본 정렬을 `SHELF_ORDER` 오름차순으로 바꿔, 사용자가 재배열한 순서가 실제 목록에 반영되게 했다.
+
+## 결정된 사항 (ADR-0005 반영)
+
+- `ReadingStatus`(`NOT_STARTED`/`READING`/`COMPLETED`)를 aggregate·계약에서 완전히 제거했다. `getLibraryBooks`의 `readingStatus` 필터, `UpdateReadingProgressResponse.readingStatus`가 함께 삭제됐다.
+- 진행 상태는 `progress`(진도율) 하나로만 표현한다 — 별도 상태 열거값·필터는 두지 않는다.
+
+## 결정된 사항 (ADR-0006 반영)
+
+- `updateLibraryBook`을 부분 수정에서 `Scrap.updateScrap`과 동일한 "항상 전체 필드 포함, nullable 필드는 `null`=삭제" 방식으로 통일했다.
+- 이 저장소의 두 PATCH 리소스(LibraryBook, Scrap)가 서로 다른 수정 방식을 쓰지 않도록 규칙을 하나로 맞췄다.
+
+## 결정된 사항 (ADR-0007 반영)
+
+- ISBN이 없는 책에 대한 "정규화된 제목+저자" 중복 판정을 완전히 제거했다 — 서로 다른 책이라도 제목·저자가 우연히 같을 수 있어, 그 판단을 서버가 강제하지 않고 사용자 자율에 맡긴다.
+- ISBN이 있는 책의 사용자별 유일성 판정만 남는다.
 
 ## 미결정 도메인
 
-- `bookNumber`의 사용자별 유일성과 재정렬 규칙
-- ISBN이 없는 책의 정확한 정규화·중복 기준
 - 표지 색상(`coverColor`)의 생성 주체와 허용 값 — 저장 필드가 정의되면 별도로 다시 설계 (ADR-0002에서 관련 필터는 우선 제거)
 - 스크랩 목록 조회의 정렬 기준(현재는 서버 기본 정렬만 있고 클라이언트가 선택할 수 있는 sortBy가 없음) — 필요해지면 Library 목록과 같은 방식으로 추가
 

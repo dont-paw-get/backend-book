@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Virtual Shelf Book Service API
-  version: 0.2.0
+  version: 0.5.0
   description: |
     Virtual Shelf MSA의 Book Service 계약이다.
     알라딘 API 기반 외부 도서 검색, 개인 서재 관리, 독서 진도, 문장 스크랩, 동물 사서를 제공한다.
@@ -115,7 +115,7 @@ paths:
                 $ref: "#/components/schemas/CreateLibraryBookResponse"
               example:
                 bookId: 123
-                bookNumber: 1
+                shelfRank: "m"
                 title: 어린 왕자
                 author: 앙투안 드 생텍쥐페리
                 currentPage: 0
@@ -141,20 +141,14 @@ paths:
             type: string
             minLength: 1
             maxLength: 100
-        - name: readingStatus
-          in: query
-          required: false
-          description: 독서 상태
-          schema:
-            $ref: "#/components/schemas/ReadingStatus"
         - name: sortBy
           in: query
           required: false
-          description: 정렬 기준
+          description: 정렬 기준. SHELF_ORDER는 사용자가 재정렬한 서재 순서(`shelfRank` 오름차순이 자연스러운 진열 순서)다.
           schema:
             type: string
-            enum: [TITLE, AUTHOR, CREATED_AT, PROGRESS]
-            default: CREATED_AT
+            enum: [SHELF_ORDER, TITLE, AUTHOR, CREATED_AT, PROGRESS]
+            default: SHELF_ORDER
         - name: sortOrder
           in: query
           required: false
@@ -162,7 +156,7 @@ paths:
           schema:
             type: string
             enum: [ASC, DESC]
-            default: DESC
+            default: ASC
         - name: page
           in: query
           required: false
@@ -192,6 +186,7 @@ paths:
               example:
                 books:
                   - bookId: 123
+                    shelfRank: "m"
                     title: 살인자의 기억법
                     author: 김영하
                     coverUrl: https://example.com/covers/9791198765432.jpg
@@ -222,7 +217,7 @@ paths:
                 $ref: "#/components/schemas/LibraryBookDetailResponse"
               example:
                 bookId: 123
-                bookNumber: 1
+                shelfRank: "m"
                 title: 어린 왕자
                 author: 앙투안 드 생텍쥐페리
                 isbn: "9788932917245"
@@ -242,7 +237,9 @@ paths:
       tags: [Library]
       operationId: updateLibraryBook
       summary: 서재 책 정보 수정
-      description: 로그인 사용자의 서재에 등록된 도서 정보를 부분 수정한다. 누락 필드는 기존 값을 유지한다.
+      description: |
+        로그인 사용자의 서재에 등록된 도서 정보를 수정한다. 7개 필드를 항상 모두 포함해야 하며,
+        `isbn`/`publisher`/`publishedDate`/`coverUrl`에 `null`을 보내면 그 값을 삭제한다.
       requestBody:
         required: true
         content:
@@ -250,12 +247,12 @@ paths:
             schema:
               $ref: "#/components/schemas/UpdateLibraryBookRequest"
             example:
-              bookNumber: 2
               title: 어린 왕자
               author: 생택쥐페리
               isbn: "9788932917245"
               publisher: 열린책들
               publishedDate: "2015-10-20"
+              coverUrl: https://example.com/covers/9788932917245.jpg
               totalPages: 158
       responses:
         "200":
@@ -266,7 +263,7 @@ paths:
                 $ref: "#/components/schemas/UpdateLibraryBookResponse"
               example:
                 bookId: 123
-                bookNumber: 2
+                shelfRank: "m"
                 title: 어린 왕자
                 totalPages: 158
                 updatedAt: "2026-08-17T01:10:00+09:00"
@@ -294,6 +291,45 @@ paths:
         "404":
           $ref: "#/components/responses/LibraryBookDeleteNotFound"
 
+  /api/v1/library/books/{bookId}/order:
+    parameters:
+      - $ref: "#/components/parameters/BookId"
+    patch:
+      tags: [Library]
+      operationId: reorderLibraryBook
+      summary: 서재 책 순서 변경
+      description: |
+        지정한 책을 서재 내 다른 책(`beforeBookId` 또는 `afterBookId`)의 앞/뒤로 옮긴다.
+        서버가 두 이웃 책 사이에 들어갈 새 `shelfRank`를 계산해 저장하므로, 클라이언트는 `shelfRank` 값을 직접 계산하거나 지정하지 않는다.
+        맨 앞/맨 뒤로 옮기려면 클라이언트가 이미 조회해 알고 있는 현재 첫 번째/마지막 책을 기준으로 지정한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderLibraryBookRequest"
+            example:
+              afterBookId: 456
+      responses:
+        "200":
+          description: 서재 책 순서 변경 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReorderLibraryBookResponse"
+              example:
+                bookId: 123
+                shelfRank: "mV"
+                updatedAt: "2026-08-20T01:10:00+09:00"
+        "400":
+          $ref: "#/components/responses/InvalidReorderTarget"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/LibraryBookReorderAccessDenied"
+        "404":
+          $ref: "#/components/responses/LibraryBookReorderNotFound"
+
   /api/v1/library/books/{bookId}/progress:
     parameters:
       - $ref: "#/components/parameters/BookId"
@@ -301,9 +337,7 @@ paths:
       tags: [Reading Progress]
       operationId: updateReadingProgress
       summary: 독서 진도 수정
-      description: |
-        현재/전체 페이지를 수정하고 진도율과 독서 상태를 서버에서 계산한다.
-        현재 페이지가 전체 페이지에 도달하면 COMPLETED로 변경한다.
+      description: 현재/전체 페이지를 수정하고 진도율을 서버에서 계산한다.
       requestBody:
         required: true
         content:
@@ -325,7 +359,6 @@ paths:
                 currentPage: 80
                 totalPages: 160
                 progress: 50.0
-                readingStatus: READING
                 updatedAt: "2026-08-17T21:30:00+09:00"
         "400":
           $ref: "#/components/responses/InvalidPageValue"
@@ -646,10 +679,6 @@ components:
           minLength: 1
           description: 사용자에게 표시 가능한 한국어 오류 메시지
 
-    ReadingStatus:
-      type: string
-      enum: [NOT_STARTED, READING, COMPLETED]
-
     ExternalBook:
       type: object
       additionalProperties: false
@@ -725,19 +754,27 @@ components:
           type: string
           format: uri
 
+    ShelfRank:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: "^[0-9A-Za-z]+$"
+      description: |
+        서재 내 정렬 순서를 나타내는 불투명한 LexoRank 키다. 오름차순 문자열(사전식) 비교가 진열 순서다.
+        클라이언트는 이 값을 직접 생성·파싱·비교하지 않는다 — 순서 변경은 `reorderLibraryBook`으로만 한다.
+      example: "m"
+
     CreateLibraryBookResponse:
       type: object
       additionalProperties: false
-      required: [bookId, bookNumber, title, author, currentPage, progress]
+      required: [bookId, shelfRank, title, author, currentPage, progress]
       properties:
         bookId:
           type: integer
           format: int64
           minimum: 1
-        bookNumber:
-          type: integer
-          format: int32
-          minimum: 1
+        shelfRank:
+          $ref: "#/components/schemas/ShelfRank"
         title:
           type: string
         author:
@@ -755,12 +792,14 @@ components:
     LibraryBookSummary:
       type: object
       additionalProperties: false
-      required: [bookId, title, author, progress]
+      required: [bookId, shelfRank, title, author, progress]
       properties:
         bookId:
           type: integer
           format: int64
           minimum: 1
+        shelfRank:
+          $ref: "#/components/schemas/ShelfRank"
         title:
           type: string
         author:
@@ -805,7 +844,7 @@ components:
       additionalProperties: false
       required:
         - bookId
-        - bookNumber
+        - shelfRank
         - title
         - author
         - totalPages
@@ -816,10 +855,8 @@ components:
           type: integer
           format: int64
           minimum: 1
-        bookNumber:
-          type: integer
-          format: int32
-          minimum: 1
+        shelfRank:
+          $ref: "#/components/schemas/ShelfRank"
         title:
           type: string
         author:
@@ -849,12 +886,8 @@ components:
     UpdateLibraryBookRequest:
       type: object
       additionalProperties: false
-      minProperties: 1
+      required: [title, author, isbn, publisher, publishedDate, coverUrl, totalPages]
       properties:
-        bookNumber:
-          type: integer
-          format: int32
-          minimum: 1
         title:
           type: string
           minLength: 1
@@ -864,36 +897,37 @@ components:
           minLength: 1
           maxLength: 100
         isbn:
-          type: string
+          type: [string, "null"]
           pattern: "^(?:[0-9]{10}|[0-9]{13})$"
         publisher:
-          type: string
+          type: [string, "null"]
           minLength: 1
           maxLength: 100
         publishedDate:
-          type: string
+          type: [string, "null"]
           format: date
         coverUrl:
-          type: string
+          type: [string, "null"]
           format: uri
         totalPages:
           type: integer
           format: int32
           minimum: 1
+      description: |
+        7개 필드를 항상 모두 포함해야 한다(부분 생략 불가). `isbn`/`publisher`/`publishedDate`/`coverUrl`는
+        `null`이면 그 값을 삭제하고, 값이 있으면 교체한다. `title`/`author`/`totalPages`는 `null`을 허용하지 않는다.
 
     UpdateLibraryBookResponse:
       type: object
       additionalProperties: false
-      required: [bookId, bookNumber, title, totalPages, updatedAt]
+      required: [bookId, shelfRank, title, totalPages, updatedAt]
       properties:
         bookId:
           type: integer
           format: int64
           minimum: 1
-        bookNumber:
-          type: integer
-          format: int32
-          minimum: 1
+        shelfRank:
+          $ref: "#/components/schemas/ShelfRank"
         title:
           type: string
         coverUrl:
@@ -903,6 +937,39 @@ components:
           type: integer
           format: int32
           minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
+
+    ReorderLibraryBookRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      maxProperties: 1
+      properties:
+        beforeBookId:
+          type: integer
+          format: int64
+          minimum: 1
+        afterBookId:
+          type: integer
+          format: int64
+          minimum: 1
+      description: |
+        `beforeBookId` 또는 `afterBookId` 중 정확히 하나만 지정한다. 대상 책을 그 책의 바로 앞/뒤로 옮긴다.
+        지정한 책은 같은 사용자 서재에 존재해야 하며, 대상 책 자신을 지정할 수 없다.
+
+    ReorderLibraryBookResponse:
+      type: object
+      additionalProperties: false
+      required: [bookId, shelfRank, updatedAt]
+      properties:
+        bookId:
+          type: integer
+          format: int64
+          minimum: 1
+        shelfRank:
+          $ref: "#/components/schemas/ShelfRank"
         updatedAt:
           type: string
           format: date-time
@@ -925,7 +992,7 @@ components:
     UpdateReadingProgressResponse:
       type: object
       additionalProperties: false
-      required: [bookId, currentPage, totalPages, progress, readingStatus, updatedAt]
+      required: [bookId, currentPage, totalPages, progress, updatedAt]
       properties:
         bookId:
           type: integer
@@ -944,8 +1011,6 @@ components:
           format: double
           minimum: 0
           maximum: 100
-        readingStatus:
-          $ref: "#/components/schemas/ReadingStatus"
         updatedAt:
           type: string
           format: date-time
@@ -1265,6 +1330,36 @@ components:
           example:
             code: LIBRARY_BOOK_NOT_FOUND
             message: 삭제할 도서를 찾을 수 없습니다.
+
+    InvalidReorderTarget:
+      description: 기준 책(beforeBookId/afterBookId)이 자기 자신이거나 같은 서재에 속하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: INVALID_REORDER_TARGET
+            message: 기준으로 지정한 책을 찾을 수 없거나 같은 서재에 속하지 않습니다.
+
+    LibraryBookReorderAccessDenied:
+      description: 서재 도서 순서 변경 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARY_BOOK_ACCESS_DENIED
+            message: 해당 도서의 순서를 변경할 권한이 없습니다.
+
+    LibraryBookReorderNotFound:
+      description: 순서를 변경할 서재 도서 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARY_BOOK_NOT_FOUND
+            message: 순서를 변경할 도서를 찾을 수 없습니다.
 
     InvalidPageValue:
       description: 현재/전체 페이지 값이 도메인 규칙을 위반함
