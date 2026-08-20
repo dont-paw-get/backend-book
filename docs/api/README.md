@@ -15,3 +15,4 @@
 ## 변경
 - [`0001-contract-normalization.md`](./decisions/0001-contract-normalization.md): 최초 계약 정규화 근거
 - [`0002-library-book-schema-fixes.md`](./decisions/0002-library-book-schema-fixes.md): 서재 도서 스키마 불일치 수정 근거
+- [`0003-scope-narrowing-and-new-resources.md`](./decisions/0003-scope-narrowing-and-new-resources.md): 장르/무드/`language` 제거, 알라딘 단일 소스화, OCR/AI 분석 삭제, 스크랩·동물 사서 추가, 이미지 파일 업로드 기능 제외 근거

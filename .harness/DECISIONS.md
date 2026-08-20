@@ -1,5 +1,22 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-20: DB 정책 반전 — Java MSA 서비스 전체가 PostgreSQL 하나를 공유, 직접 JOIN 허용 (CLIAR-43)
+
+- **기존 결정 반전:** 2026-08-18에 "Book Service와 Python RAG Service는 각자 PostgreSQL을 소유하고 DB를 직접 공유하지 않는다"고 결정했었다. 사용자가 "MSA로 서버는 여러 개지만 RDB는 하나만 사용해서 각 서비스가 원하는 데이터를 조인해서 사용하기로 했다"고 명시적으로 방향을 바꿔, Java 기반 MSA 서비스 전체가 PostgreSQL 인스턴스·데이터베이스 하나를 공유하고 서로의 schema를 직접 JOIN할 수 있도록 정책을 바꿨다.
+- **Python RAG 서비스는 예외:** 이 공유 DB에 RAG 서비스는 포함되지 않는다 — RAG는 지금처럼 자체 PostgreSQL + pgvector를 별도로 소유하고, 데이터 공유는 여전히 API/event로만 한다. 사용자에게 직접 확인해 RAG는 범위에서 제외했다.
+- **schema 소유권은 유지:** 하나의 DB를 공유하더라도 각 서비스는 자신의 schema(테이블)를 자신의 Flyway migration으로만 관리한다. 다른 서비스 schema는 읽기용 JOIN 대상일 뿐, 쓰기 마이그레이션 권한은 옮기지 않는다.
+- **이 저장소에서 아직 하지 않은 것:** 실제로 공유할 다른 서비스의 schema/테이블 이름, JOIN이 필요한 구체적 쿼리, DB 계정·권한 분리 방식은 아직 정해지지 않았다 — 다른 서비스가 구체화되는 시점에 재검토.
+- 영향받은 문서: `AGENTS.md`/`CLAUDE.md`(하네스: DB 정책), `.harness/ARCHITECTURE.md`(서비스 경계). `docker-compose.yml`/`application-*.yaml`은 이 저장소가 이미 단일 PostgreSQL에 연결하는 구조라 즉시 변경할 부분은 없었다.
+
+## 2026-08-20: API 계약 재정의 — 장르/무드/language 제거, 알라딘 단일 소스화, 신규 리소스 2종 추가 (CLIAR-43)
+
+- 상세 배경과 결정 목록은 `docs/api/decisions/0003-scope-narrowing-and-new-resources.md`(ADR-0003) 참조 — API wire 계약 결정은 `docs/api`가 소유하므로 이 문서에는 요약만 남긴다.
+- 핵심: 장르(`genre`)·무드(`moodTags`)·`language` 완전 제거, 표지 OCR·AI 도서 분석 엔드포인트 삭제, 외부 도서 검색을 알라딘 API 단일 소스로 한정, 스크랩(Scrap)·동물 사서(Librarian)를 신규 리소스로 추가.
+- **기존 결정 반전 1 — 스크랩 범위:** `docs/api/decisions/0002-library-book-schema-fixes.md`가 "문장 OCR·감상·비밀 메모는 다른 MSA 컴포넌트 담당이라 범위 밖"이라고 명시했던 것을, 사용자가 담당 기능표를 다시 확인하면서 스크랩 CRUD를 이 저장소 범위로 재편입하는 것으로 뒤집었다. 문장을 이미지에서 추출하는 OCR 자체(텍스트 인식)는 여전히 범위 밖이다.
+- **기존 결정 반전 2 — `language`:** 같은 ADR-0002가 "사용자가 선택 입력, 생략 시 서버가 `ko`로 채운다"로 도입했던 `language` 필드를, 알라딘 API가 언어 정보를 전혀 제공하지 않고 담당 기능표에도 없어 전 스키마·필터에서 제거했다.
+- **알라딘 API 실제 응답 확인:** 사용자가 제공한 실제 알라딘 API 예시로 두 가지를 확인했다. (1) `totalPages`(페이지 수)는 대부분의 도서에서 응답에 아예 없다 — 선택 필드로 유지하고, 사용자 직접 입력이 예외가 아니라 일반 경로임을 문서에 명시했다. (2) `author`는 "이름 (지은이)" 형식의 역할 라벨이 붙은 결합 문자열이라, 서버가 역할 라벨을 제거하고 이름만(여러 명이면 쉼표로 구분) 반환하도록 정했다 — 원문 그대로 저장하면 저자 필터·정렬·중복 판정이 깨지기 때문. 파싱 로직은 아직 구현 전이며 `.harness/PLAN.md`의 Book Discovery API 섹션에 체크리스트로 남겼다.
+- **이미지 파일 업로드 기능 추가 후 제거:** 같은 작업에서 표지 이미지 교체(`replaceLibraryBookCover`)와 스크랩 이미지 교체(`replaceScrapImage`)를 한 차례 신규 리소스로 추가했으나, 둘 다 오브젝트 스토리지(S3 등) 연동이 필요해 "단순 DB CRUD" 범위를 벗어난다는 걸 뒤늦게 확인해 사용자 확인 후 제거했다. `coverUrl`은 문자열(URL) 필드로만 남아 등록/수정 요청에서 계속 설정할 수 있다.
+
 ## 2026-08-19: 인증 기반 — AWS Cognito 대상 Resource Server 설정, 실제 Pool 없이도 기동 가능하게 구성
 
 - **인증 서비스 = AWS Cognito User Pool:** 사용자 확인. `issuer-uri` 형식은 `https://cognito-idp.{region}.amazonaws.com/{userPoolId}`.
