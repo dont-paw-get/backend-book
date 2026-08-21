@@ -3,6 +3,8 @@ package com.chc.dpgb.library;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -16,26 +18,49 @@ class LibraryBookRepositoryJpaAdapter implements LibraryBookRepository {
 
 	@Override
 	public LibraryBook save(LibraryBook libraryBook) {
-		return jpaRepository.save(libraryBook);
+		return jpaRepository.saveAndFlush(libraryBook);
 	}
 
 	@Override
-	public Optional<LibraryBook> findOwnedBook(Long bookId, String memberId) {
-		return jpaRepository.findByBookIdAndMemberId(bookId, memberId);
+	public void delete(LibraryBook libraryBook) {
+		jpaRepository.delete(libraryBook);
 	}
 
 	@Override
-	public List<LibraryBook> findShelfOrderedByRank(String memberId) {
-		return jpaRepository.findByMemberIdOrderByShelfRankAsc(memberId);
+	public Optional<LibraryBook> findById(Long bookId) {
+		return jpaRepository.findById(bookId);
 	}
 
 	@Override
-	public Optional<LibraryBook> findLastRanked(String memberId) {
-		return jpaRepository.findTopByMemberIdOrderByShelfRankDesc(memberId);
+	public List<LibraryBook> findShelfOrderedByRank(Long shelfId) {
+		return jpaRepository.findByShelfIdOrderByShelfRankAsc(shelfId);
+	}
+
+	@Override
+	public Optional<LibraryBook> findLastRanked(Long shelfId) {
+		return jpaRepository.findTopByShelfIdOrderByShelfRankDesc(shelfId);
 	}
 
 	@Override
 	public boolean existsByIsbn(String memberId, String isbn) {
 		return jpaRepository.existsByMemberIdAndIsbn(memberId, isbn);
+	}
+
+	@Override
+	public long countByShelfId(Long shelfId) {
+		return jpaRepository.countByShelfId(shelfId);
+	}
+
+	@Override
+	public Page<LibraryBook> findPage(String memberId, Long shelfId, String author, Pageable pageable) {
+		return jpaRepository.findPage(memberId, shelfId, author, pageable);
+	}
+
+	@Override
+	public Page<LibraryBook> findPageOrderByProgress(
+			String memberId, Long shelfId, String author, boolean ascending, Pageable pageable) {
+		return ascending
+				? jpaRepository.findPageOrderByProgressAsc(memberId, shelfId, author, pageable)
+				: jpaRepository.findPageOrderByProgressDesc(memberId, shelfId, author, pageable);
 	}
 }

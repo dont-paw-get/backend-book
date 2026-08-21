@@ -27,6 +27,9 @@ public class LibraryBook {
 	@Column(name = "member_id", nullable = false)
 	private String memberId;
 
+	@Column(name = "shelf_id", nullable = false)
+	private Long shelfId;
+
 	@Column(name = "shelf_rank", nullable = false)
 	private String shelfRank;
 
@@ -63,9 +66,10 @@ public class LibraryBook {
 	protected LibraryBook() {
 	}
 
-	private LibraryBook(String memberId, String shelfRank, String title, String author, String isbn,
+	private LibraryBook(String memberId, Long shelfId, String shelfRank, String title, String author, String isbn,
 			String publisher, LocalDate publishedDate, String coverUrl, int totalPages) {
 		this.memberId = memberId;
+		this.shelfId = shelfId;
 		this.shelfRank = shelfRank;
 		this.title = title;
 		this.author = author;
@@ -77,9 +81,9 @@ public class LibraryBook {
 		changeTotalPages(totalPages);
 	}
 
-	public static LibraryBook register(String memberId, String shelfRank, String title, String author, String isbn,
-			String publisher, LocalDate publishedDate, String coverUrl, int totalPages) {
-		return new LibraryBook(memberId, shelfRank, title, author, isbn, publisher, publishedDate, coverUrl,
+	public static LibraryBook register(String memberId, Long shelfId, String shelfRank, String title, String author,
+			String isbn, String publisher, LocalDate publishedDate, String coverUrl, int totalPages) {
+		return new LibraryBook(memberId, shelfId, shelfRank, title, author, isbn, publisher, publishedDate, coverUrl,
 				totalPages);
 	}
 
@@ -110,6 +114,11 @@ public class LibraryBook {
 	}
 
 	public void changeShelfRank(String newShelfRank) {
+		this.shelfRank = newShelfRank;
+	}
+
+	public void changeShelfId(Long newShelfId, String newShelfRank) {
+		this.shelfId = newShelfId;
 		this.shelfRank = newShelfRank;
 	}
 

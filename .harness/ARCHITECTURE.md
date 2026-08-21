@@ -33,12 +33,23 @@ src/main/java/com/chc/dpgb
 │     ├─ GlobalExceptionHandler.java  # @RestControllerAdvice — 5개 abstract 타입 + 500 fallback(INTERNAL_ERROR)을 ErrorResponse로 매핑
 │     └─ (stable error code별 concrete 예외 13종 — InvalidSearchParameterException 등, openapi.yaml의 components.responses.* 기준)
 ├─ library
-│  ├─ LibraryBook.java                   # aggregate root(JPA entity) — register/updateMetadata/updateProgress/changeShelfRank에 불변식 캡슐화
+│  ├─ LibraryBook.java                   # aggregate root(JPA entity) — register/updateMetadata/updateProgress/changeShelfRank/changeShelfId에 불변식 캡슐화
 │  ├─ LibraryBookRepository.java         # 포트(순수 인터페이스, Spring Data 비의존) — 서비스 계층이 의존하는 도메인 메서드명
-│  ├─ LibraryBookJpaRepository.java      # Spring Data JPA 인터페이스(package-private) — 파생 쿼리 메서드명, 포트 구현체 내부에서만 사용
-│  ├─ LibraryBookRepositoryJpaAdapter.java  # @Repository, LibraryBookRepository 구현 — LibraryBookJpaRepository로 위임
+│  ├─ LibraryBookJpaRepository.java      # Spring Data JPA 인터페이스(package-private) — 파생 쿼리 메서드명 + 필터/정렬용 @Query, 포트 구현체 내부에서만 사용
+│  ├─ LibraryBookRepositoryJpaAdapter.java  # @Repository, LibraryBookRepository 구현 — LibraryBookJpaRepository로 위임, save()는 saveAndFlush로 위임해 unique 제약 위반을 호출 시점에 동기적으로 드러냄
+│  ├─ LibraryBookService.java            # 애플리케이션 서비스 — CRUD/reorder/moveShelf/progress 유스케이스, 소유권 검증(404→403 순서), shelfRank 계산·rebalance 오케스트레이션. 쓰기가 없는 메서드(getLibraryBooks/getLibraryBook)는 `@Transactional(readOnly = true)` — PostgreSQL이 read-only transaction을 지원해 그 안에서 쓰기 시도 시 DB가 거부한다. get-or-create처럼 조회 중 쓰기가 발생할 수 있는 메서드(`ShelfService.getShelves`)는 readOnly로 표시하지 않는다
+│  ├─ LibrarySortBy.java                 # getLibraryBooks의 sortBy enum(SHELF_ORDER/TITLE/AUTHOR/CREATED_AT/PROGRESS)
+│  ├─ Shelf.java                         # aggregate root(JPA entity) — create/rename, isDefault는 서버 전용
+│  ├─ ShelfRepository.java               # 포트 — LibraryBookRepository와 동일한 패턴
+│  ├─ ShelfJpaRepository.java            # Spring Data JPA 인터페이스(package-private)
+│  ├─ ShelfRepositoryJpaAdapter.java     # @Repository, save()는 saveAndFlush로 위임(기본 책장 get-or-create 동시성 처리용)
+│  ├─ ShelfService.java                 # getOrCreateDefaultShelf(동시성 처리)/createShelf/getShelves/updateShelf/deleteShelf(책 이동 후 삭제)
 │  ├─ ShelfRank.java                     # LexoRank pure 유틸(Spring 비의존) — initial/before/after/between/rebalancedSequence
-│  └─ ShelfRankExhaustedException.java   # 키 공간 소진 내부 신호(API 미노출) — rebalance 트리거용
+│  ├─ ShelfRankExhaustedException.java   # 키 공간 소진 내부 신호(API 미노출) — rebalance 트리거용
+│  └─ web
+│     ├─ LibraryBookController.java      # POST/GET /api/v1/library/books, GET/PATCH/DELETE /{bookId}, /order, /shelf, /progress
+│     ├─ ShelfController.java            # POST/GET /api/v1/library/shelves, PATCH/DELETE /{shelfId}, GET /{shelfId}/books
+│     └─ dto                             # openapi.yaml 스키마 1:1 대응 record. Bean Validation 미도입 — 필수/불변식 검증은 도메인 계층의 IllegalArgumentException을 서비스가 잡아 concrete 예외로 번역하는 방식으로 통일(컨트롤러는 primitive 언박싱이 필요한 필드의 null만 직접 체크)
 └─ security
    ├─ SecurityConfig.java             # JwtDecoder/SecurityFilterChain/AuthenticationEntryPoint 빈
    ├─ JwtAuthenticationEntryPoint.java
@@ -53,12 +64,17 @@ src/main/resources
 ├─ application-prod.yaml     # 운영 프로필 — 전부 env var, 기본값 없음
 └─ db/migration
    ├─ V1__init.sql                     # baseline (빈 마이그레이션)
-   └─ V2__create_library_book.sql      # library_book 테이블 + unique 제약(member_id+shelf_rank, member_id+isbn partial — isbn 없는 도서는 중복판정 안 함, ADR-0007)
+   ├─ V2__create_library_book.sql      # library_book 테이블 + unique 제약(member_id+isbn partial — isbn 없는 도서는 중복판정 안 함, ADR-0007)
+   └─ V3__add_shelf_and_rescope_library_book.sql  # shelf 테이블(+ 기본 책장 부분 unique 인덱스) 신설, library_book.shelf_id 추가(+ FK), shelfRank unique 제약을 member_id 전역→shelf_id 범위로 재조정(ADR-0008). V2는 develop에 이미 병합되어 직접 수정하지 않음
 
 src/test/java/com/chc/dpgb
 ├─ common/exception/GlobalExceptionHandlerTest.java
 ├─ library/ShelfRankTest.java
 ├─ library/LibraryBookTest.java
+├─ library/ShelfServiceTest.java          # Mockito 기반 애플리케이션 서비스 단위 테스트 — get-or-create 동시성, 소유권 404/403
+├─ library/LibraryBookServiceTest.java    # Mockito 기반 — shelf 해석, 중복 409, reorder 검증/rebalance, moveShelf
+├─ library/web/LibraryBookControllerTest.java  # @WebMvcTest — SecurityConfigTest 패턴 재사용, 컨트롤러 자체 검증(필수 필드 누락 400 등) 위주
+├─ library/web/ShelfControllerTest.java        # @WebMvcTest
 └─ security/...  # validator/MemberIdResolver 단위 테스트, SecurityConfigTest
 
 src/integrationTest/java/com/chc/dpgb
@@ -66,7 +82,8 @@ src/integrationTest/java/com/chc/dpgb
 ├─ IntegrationTestSupport.java            # @SpringBootTest + TestcontainersConfiguration import
 ├─ RepositoryIntegrationTestSupport.java  # @DataJpaTest + AutoConfigureTestDatabase(NONE) + @ImportAutoConfiguration(FlywayAutoConfiguration) + TestcontainersConfiguration import
 ├─ DpgbApplicationTests.java              # IntegrationTestSupport 상속 (smoke test)
-└─ library/LibraryBookRepositoryTest.java # RepositoryIntegrationTestSupport 상속 — 저장/조회, unique 제약, 소유권 스코프
+├─ library/LibraryBookRepositoryTest.java # RepositoryIntegrationTestSupport 상속 — 저장/조회, unique 제약(shelf_id 범위), FK
+└─ library/ShelfRepositoryTest.java       # RepositoryIntegrationTestSupport 상속 — 기본 책장 unique 제약, 목록 정렬
 
 src/integrationTest/resources
 └─ testcontainers.properties  # testcontainers.reuse.enable=true
