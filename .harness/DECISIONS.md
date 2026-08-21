@@ -1,5 +1,20 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-21: DB 정책 재반전 — MSA 원칙에 맞게 서비스별 PostgreSQL 분리로 되돌림
+
+- **기존 결정 재반전:** 2026-08-20에 "Java 기반 MSA 서비스 전체가 PostgreSQL 인스턴스·데이터베이스 하나를 공유하고 서로의 schema를 직접 JOIN할 수 있다"로 정책을 바꿨었다(당시도 사용자 명시적 지시). 이번에 사용자가 "MSA 의의에 맞게" 서비스마다 DB를 분리하는 쪽으로 다시 명시적으로 방향을 바꿨다 — database-per-service가 서비스 간 결합도를 낮추는 MSA 본래 취지에 더 부합한다는 판단.
+- **되돌린 내용:** Book Service는 다시 자신만의 PostgreSQL 인스턴스·데이터베이스만 소유한다. 다른 Java MSA 서비스든 Python RAG 서비스든 schema를 직접 JOIN할 수 없고, 모든 서비스 간 데이터 공유는 API 또는 event로만 한다(RAG는 애초에 이 정책 변경 전후 내내 별도 DB를 유지해 영향 없음).
+- **실제 코드/설정에는 영향이 없었다:** 확인해보니 `docker-compose.yml`(`POSTGRES_DB: dpgb`), `application-local.yaml`(`jdbc:postgresql://localhost:5432/dpgb`), `application-prod.yaml`(`DB_URL`/`DB_USERNAME`/`DB_PASSWORD` env var)은 애초부터 이 저장소 전용 DB(`dpgb`)만 가리키고 있었다 — 공유 DB 정책은 "다른 서비스의 schema를 같은 인스턴스에서 직접 JOIN할 수 있다"는 향후 가능성만 문서화했을 뿐, 실제로 공유할 다른 서비스의 schema/테이블 이름이 정해진 적도, JOIN 쿼리가 작성된 적도 없었다(2026-08-20 결정문 자체가 이를 "아직 하지 않은 것"으로 명시). 그래서 이번 되돌림은 문서(정책 서술)만 수정하면 되고 코드/마이그레이션/설정 변경은 없다.
+- **영향받은 문서:** `AGENTS.md`/`CLAUDE.md`(하네스: DB 정책 — 공유 서술 제거, database-per-service로 재기술), `.harness/ARCHITECTURE.md`(서비스 경계), `.harness/BACKLOG.md`(공유 DB 전제의 백로그 항목 — 스키마/계정 분리, DB 이름 재검토 — 제거, 더 이상 해당 없음).
+
+## 2026-08-21: Scrap CRUD API 구현 — 책 삭제 시 스크랩 cascade 삭제, 실제 구현 티켓은 CLIAR-45 (CLIAR-45)
+
+- **티켓 번호 정정:** `.harness/PLAN.md`는 계약 설계 당시 티켓(CLIAR-43, API 계약 재정의)을 그대로 라벨로 남겨뒀었다. 실제 구현은 별도 티켓 `CLIAR-45-Scrap-CRUD-API` 브랜치에서 진행됐다 — Shelf가 "계약 설계(CLIAR-47) → 구현(CLIAR-32)"로 티켓이 나뉘었던 것과 같은 패턴.
+- **책 삭제 시 스크랩 cascade 삭제:** `.harness/DOMAIN.md`가 스크랩을 "LibraryBook을 통해서만 귀속되는 하위 리소스"로 규정하지만, 소유 책이 삭제됐을 때 스크랩을 어떻게 할지는 명시하지 않았다. Shelf 삭제 시 책을 기본 책장으로 "이동"시키는 것과 달리 스크랩은 옮길 곳이 없으므로, `V4__create_scrap.sql`의 `book_id` FK에 `ON DELETE CASCADE`를 걸어 책이 삭제되면 스크랩도 함께 삭제되도록 DB 레벨에서 처리했다. 애플리케이션 코드(`LibraryBookService.deleteLibraryBook`)는 스크랩을 전혀 알 필요가 없다.
+- **스크랩은 독립 `memberId`를 저장하지 않는다:** DOMAIN.md 원칙을 그대로 따라 `scrap` 테이블에 `member_id` 컬럼을 두지 않았다. 대신 스크랩 스코프 endpoint(`getScrap`/`updateScrap`/`deleteScrap`)는 매번 스크랩 → 소속 `LibraryBook` 조회를 거쳐 소유권을 검증한다(조회 1회 추가, 하지만 aggregate 경계를 코드로도 강제할 수 있는 이점).
+- **테스트 함정 — DB cascade와 Hibernate 1차 캐시 불일치:** `ScrapRepositoryTest`에서 `libraryBookRepository.delete(book)` + `flush()`만으로는 DB가 cascade로 지운 스크랩 행을 Hibernate 영속성 컨텍스트가 여전히 "관리 중"으로 착각해 `scrapRepository.findById(...)`가 여전히 값을 반환했다. `TestEntityManager.clear()`(패키지가 Boot 4.1에서 `org.springframework.boot.jpa.test.autoconfigure.TestEntityManager`로 재배치됨)로 1차 캐시를 비운 뒤에야 실제 DB 상태를 재확인할 수 있었다.
+- 영향받은 문서: `.harness/DOMAIN.md`(Scrap aggregate 절에 cascade 규칙 추가), `.harness/ARCHITECTURE.md`(패키지 구조·마이그레이션·테스트 목록), `.harness/PLAN.md`(Scrap CRUD API 섹션 제거), `.harness/STATE.md`.
+
 ## 2026-08-21: 자바 코드 스타일 확정 — 줄바꿈된 파라미터 목록도 연속 들여쓰기(8칸) 그대로 유지
 
 - **배경:** `docs/intellij-java-wooteco-style.xml`로 전체 자바 코드(`src` 하위 98개 파일)를 재포맷한 뒤, 생성자/메서드 파라미터가 120열을 넘겨 줄바꿈될 때 파라미터 줄이 8칸(연속 들여쓰기) 들여써지는 게 맞는지 문제 제기가 있었다. 사용자는 `ALPHABET` 예시처럼 "표현식이 길어 줄바꿈"하는 경우만 8칸이고, 파라미터를 한 줄에 하나씩 나열하는 "일반적인 경우"는 4칸(기본 블록 들여쓰기)이어야 하지 않냐고 물었다.

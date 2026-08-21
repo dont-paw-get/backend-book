@@ -26,11 +26,11 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.chc.dpgb.common.exception.GlobalExceptionHandler;
-import com.chc.dpgb.library.LibraryBook;
-import com.chc.dpgb.library.LibraryBookService;
-import com.chc.dpgb.library.LibrarySortBy;
-import com.chc.dpgb.library.Shelf;
-import com.chc.dpgb.library.ShelfService;
+import com.chc.dpgb.library.application.LibraryBookService;
+import com.chc.dpgb.library.application.LibrarySortBy;
+import com.chc.dpgb.library.application.ShelfService;
+import com.chc.dpgb.library.domain.LibraryBook;
+import com.chc.dpgb.library.domain.Shelf;
 import com.chc.dpgb.security.SecurityConfig;
 
 @WebMvcTest(controllers = ShelfController.class)

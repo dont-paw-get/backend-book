@@ -1,4 +1,4 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.domain;
 
 import java.time.Instant;
 import java.time.LocalDate;

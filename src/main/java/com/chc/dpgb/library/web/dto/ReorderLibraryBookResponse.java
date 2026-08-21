@@ -2,7 +2,7 @@ package com.chc.dpgb.library.web.dto;
 
 import java.time.Instant;
 
-import com.chc.dpgb.library.LibraryBook;
+import com.chc.dpgb.library.domain.LibraryBook;
 
 public record ReorderLibraryBookResponse(Long bookId, String shelfRank, Instant updatedAt) {
 

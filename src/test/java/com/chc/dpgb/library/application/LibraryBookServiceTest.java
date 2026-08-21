@@ -1,4 +1,4 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -22,6 +22,9 @@ import com.chc.dpgb.common.exception.InvalidReorderTargetException;
 import com.chc.dpgb.common.exception.InvalidShelfTargetException;
 import com.chc.dpgb.common.exception.LibraryBookAccessDeniedException;
 import com.chc.dpgb.common.exception.LibraryBookNotFoundException;
+import com.chc.dpgb.library.domain.LibraryBook;
+import com.chc.dpgb.library.domain.Shelf;
+import com.chc.dpgb.library.domain.ShelfRank;
 
 @ExtendWith(MockitoExtension.class)
 class LibraryBookServiceTest {

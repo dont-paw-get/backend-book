@@ -1,4 +1,4 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.application;
 
 public enum LibrarySortBy {
     SHELF_ORDER,

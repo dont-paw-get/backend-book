@@ -1,4 +1,4 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -19,6 +19,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import com.chc.dpgb.common.exception.DefaultShelfCannotBeDeletedException;
 import com.chc.dpgb.common.exception.ShelfAccessDeniedException;
 import com.chc.dpgb.common.exception.ShelfNotFoundException;
+import com.chc.dpgb.library.domain.Shelf;
 
 @ExtendWith(MockitoExtension.class)
 class ShelfServiceTest {

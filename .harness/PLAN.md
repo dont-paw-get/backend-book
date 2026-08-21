@@ -2,18 +2,6 @@
 
 완료된 항목은 여기 체크만 남기지 않고 `STATE.md`로 옮긴 뒤 이 문서에서 제거한다.
 
-## Scrap CRUD API (신규, CLIAR-43)
-
-`.harness/DOMAIN.md`의 Scrap aggregate 규칙을 구현 기준으로 삼는다. 스크랩은 LibraryBook 소유자(`memberId`) 기준으로 접근 권한을 검증한다.
-
-- [ ] `Scrap` aggregate 설계 — `scrapId`, `bookId`, `sentence`, `pageNumber`(nullable), `memo`(nullable), 생성/수정 시각
-- [ ] `POST /api/v1/library/books/{bookId}/scraps`(`createScrap`) — 생성, LibraryBook 소유자 아니면 403/404
-- [ ] `GET /api/v1/library/books/{bookId}/scraps`(`getScraps`) — 책별 목록, page/size 페이징
-- [ ] `GET /api/v1/library/scraps/{scrapId}`(`getScrap`) — 상세 조회
-- [ ] `PATCH /api/v1/library/scraps/{scrapId}`(`updateScrap`) — `sentence`/`pageNumber`/`memo` 항상 전체 포함, `pageNumber`/`memo`에 `null` = 삭제, 값 = 교체. `sentence`는 `null` 불가
-- [ ] `DELETE /api/v1/library/scraps/{scrapId}`(`deleteScrap`) — 204
-- [ ] 각 endpoint의 계약 테스트 작성(소유권 403/404 케이스 포함)
-
 ## Librarian API (신규, CLIAR-43)
 
 `.harness/DOMAIN.md`의 Librarian aggregate 규칙을 구현 기준으로 삼는다.

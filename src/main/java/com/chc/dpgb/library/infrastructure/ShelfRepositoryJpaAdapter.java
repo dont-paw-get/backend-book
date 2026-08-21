@@ -1,9 +1,12 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.infrastructure;
 
 import java.util.List;
 import java.util.Optional;
 
 import org.springframework.stereotype.Repository;
+
+import com.chc.dpgb.library.application.ShelfRepository;
+import com.chc.dpgb.library.domain.Shelf;
 
 @Repository
 class ShelfRepositoryJpaAdapter implements ShelfRepository {

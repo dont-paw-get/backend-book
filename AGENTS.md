@@ -72,8 +72,8 @@ API wire 계약과 계약 결정은 `.harness`가 아니라 `docs/api/openapi.ya
 
 - Book Service(이 저장소)의 유일한 RDB는 PostgreSQL이다. 로컬 실행, 테스트, 운영 모두 PostgreSQL을 사용한다.
 - H2는 사용하지 않는다. `com.h2database:h2`, `spring-boot-h2console` 의존성은 제거 대상이다.
-- MSA로 서버(서비스)는 여러 개로 나누지만, Java 기반 MSA 서비스 전체가 PostgreSQL 인스턴스·데이터베이스 하나를 공유한다. 각 서비스는 자신의 schema(테이블)는 자신의 Flyway migration으로만 관리하지만, 다른 서비스가 소유한 schema를 직접 JOIN해서 조회할 수 있다 — 서비스 간 데이터 공유에 반드시 API나 event를 거칠 필요는 없다.
-- 별도로 개발되는 Python RAG 서비스는 이 공유 PostgreSQL에 포함되지 않는다. RAG 서비스는 지금처럼 자체 PostgreSQL + pgvector를 별도로 소유하며, RAG와의 데이터 공유는 공개 API 또는 합의된 event로만 한다.
+- MSA 원칙에 따라 각 서비스는 자신만의 PostgreSQL 인스턴스·데이터베이스를 소유한다(database-per-service). Book Service(이 저장소)의 DB는 다른 어떤 서비스와도 공유하지 않으며, 다른 서비스의 schema를 직접 JOIN해서 조회할 수 없다 — 서비스 간 데이터 공유는 반드시 API 또는 event를 거친다.
+- Python RAG 서비스도 마찬가지로 자체 PostgreSQL + pgvector를 별도로 소유한다. RAG와의 데이터 공유도 다른 Java MSA 서비스와 동일하게 공개 API 또는 합의된 event로만 한다.
 - 로컬 개발 환경의 PostgreSQL은 Docker로 실행한다. 운영 접속 정보는 비밀값으로 주입하고 코드나 설정 파일에 기본값을 넣지 않는다.
 
 ## 하네스: 테스트 실행 정책
