@@ -141,8 +141,18 @@ class LibraryBookTest {
 		assertThat(book.getTitle()).isEqualTo("어린 왕자");
 	}
 
+	@Test
+	void changeShelfId는_책장과_순서를_함께_변경한다() {
+		LibraryBook book = register(160);
+
+		book.changeShelfId(2L, "m");
+
+		assertThat(book.getShelfId()).isEqualTo(2L);
+		assertThat(book.getShelfRank()).isEqualTo("m");
+	}
+
 	private LibraryBook register(int totalPages) {
-		return LibraryBook.register("member-1", "m", "어린 왕자", "생텍쥐페리", "9788932917245",
+		return LibraryBook.register("member-1", 1L, "m", "어린 왕자", "생텍쥐페리", "9788932917245",
 				"열린책들", LocalDate.of(2015, 10, 20), "https://example.com/cover.jpg", totalPages);
 	}
 }
