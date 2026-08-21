@@ -1,5 +1,16 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-21: Book Discovery API — 스텁 대신 실제 알라딘 연동, 라이브 호출로 응답 형태 확정 (CLIAR-34)
+
+- **계획 변경:** `.harness/PLAN.md`는 원래 "자격 증명이 없으므로 어댑터 인터페이스 + 스텁 구현"을 계획했었다. 구현 도중 사용자가 실제 알라딘 TTBKey(`.env`의 `ALADIN_API_TTB_KEY`)를 확보했다고 알려와, 스텁을 만들지 않고 바로 실제 연동(`AladinBookDiscoveryClient`)을 구현했다.
+- **실제 응답 형태를 라이브 호출로 확인:** 문서만으로는 알 수 없던 세 가지를 실제 알라딘 API를 호출해 확인했다. (1) 오류도 HTTP 200으로 오고 바디가 `{"errorCode":..,"errorMessage":..}` 형태다 — HTTP status가 아니라 응답 바디의 `errorCode` 존재 여부로 실패를 판정해야 한다. (2) `OptResult=itemPage`를 요청해도 `subInfo.itemPage`는 테스트한 모든 검색에서 비어 있었다 — "totalPages는 대부분 없다"(2026-08-20 결정)는 실측으로도 확인됐다. (3) `isbn13`은 항상 신뢰 가능한 13자리 숫자지만 `isbn`(10자리) 필드는 "K"로 시작하는 알라딘 내부 코드인 경우가 있어, `isbn13`을 우선 사용하고 유효성(정규식) 검사 후 실패하면만 `isbn`으로 폴백한다.
+- **QueryType 라우팅:** 알라딘 ItemSearch는 `Query`+`QueryType` 한 쌍만 받고 title/author를 동시에 AND 검색하는 기능이 없다. `title`만 있으면 `QueryType=Title`, `author`만 있으면 `QueryType=Author`로 정밀 검색하고, 둘 다 있으면 `QueryType=Keyword`(자유 검색)로 두 값을 공백으로 이어붙여 보낸다.
+- **`spring-boot-starter-restclient` 추가:** `RestClient.Builder`가 `spring-boot-starter-webmvc`만으로는 자동구성되지 않아(Boot 4.1 세분화 모듈 체계, `spring-boot-starter-flyway` 때와 같은 패턴) 별도로 추가했다. 빠뜨린 채로 통합 테스트를 돌려 `NoSuchBeanDefinitionException`으로 바로 드러났다.
+- **`@Lazy`를 빈+주입 지점 양쪽에:** `AladinBookDiscoveryClient`(`@Value`로 TTBKey를 읽는 빈)에 `@Lazy`만 붙이고 `BookDiscoveryService` 생성자 주입 지점에는 붙이지 않았더니, `ALADIN_API_TTB_KEY`가 없는 환경(이 세션의 실행 셸 포함, CI도 마찬가지)에서 `./gradlew integrationTest`가 즉시 실패했다 — CLIAR-28(`JwtDecoder`)에서 이미 겪었던 것과 똑같은 원인이라 같은 해법(양쪽 모두 `@Lazy`)을 적용했다.
+- **테스트 전략:** 실제 네트워크 호출 없이 `MockRestServiceServer`에 라이브 호출로 캡처한 실제 응답 JSON을 fixture로 사용해 매핑·에러·QueryType 분기를 검증했다 — 반복 가능하고 자격 증명에 의존하지 않는 테스트를 유지하면서도 실제 응답 형태를 정확히 반영한다.
+- **미해결:** `.env`는 이 앱이 자동으로 읽지 않는다(dotenv 미도입) — 사용자가 로컬 실행 시 직접 셸/IDE에 `ALADIN_API_TTB_KEY`를 주입해야 한다. 필요해지면 dotenv 도입 여부를 별도로 검토(`.harness/BACKLOG.md` 후보).
+- 영향받은 문서: `.harness/ARCHITECTURE.md`(기술 스택·저장소 구조·비밀값 절), `.harness/STATE.md`, `.harness/PLAN.md`(Book Discovery API 섹션 제거), `build.gradle`.
+
 ## 2026-08-20: `spring-boot-starter-flyway` 누락 발견 및 추가 (CLIAR-31)
 
 - **문제:** LibraryBook 도메인/영속성(CLIAR-31) 구현으로 이 저장소 최초의 `@Entity`(`LibraryBook`)와 Flyway migration(`V2__create_library_book.sql`)을 추가하자, `RepositoryIntegrationTestSupport`(`@DataJpaTest`)와 `@SpringBootTest`(`IntegrationTestSupport`) 양쪽에서 Hibernate가 `ddl-auto: validate` 단계에서 `missing table [library_book]`로 실패했다.

@@ -7,6 +7,7 @@
 - Java 21, Spring Boot 4.1.0, Gradle Wrapper 9.5.1
 - Spring MVC, Spring Data JPA, Flyway(`flyway-core`, `flyway-database-postgresql` + Boot autoconfigure를 가져오는 `spring-boot-starter-flyway` — 이 starter 없이는 `FlywayAutoConfiguration`이 로드되지 않아 마이그레이션이 자동 실행되지 않는다, CLIAR-31에서 발견)
 - Spring Security OAuth2 Resource Server(`spring-boot-starter-oauth2-resource-server`) — JWT 검증, 인증 서비스는 AWS Cognito User Pool
+- `spring-boot-starter-restclient` — `RestClient.Builder` 자동구성(`RestClientAutoConfiguration`)을 제공. `spring-boot-starter-webmvc`에 딸려오지 않아 별도 추가(CLIAR-34, Flyway 때와 동일한 Boot 4.1 세분화 모듈 패턴). 알라딘 API 연동(`AladinBookDiscoveryClient`)에서 사용
 - 기준 패키지: `com.chc.dpgb`
 - DB: PostgreSQL (JDBC 드라이버 `org.postgresql:postgresql`, 스키마는 Flyway migration으로 관리, `spring.jpa.hibernate.ddl-auto: validate`)
 - Testcontainers(`org.testcontainers:junit-jupiter`, `org.testcontainers:postgresql`) — 버전은 `build.gradle` 주석 참조. `io.spring.dependency-management`가 Spring Boot BOM의 testcontainers-bom 중첩 import를 반영하지 못하고, Boot 4.1.0이 가리키는 testcontainers.version이 아직 Maven Central에 없어 실재하는 버전을 직접 고정했다. Boot 업그레이드 시 재검토.
@@ -50,6 +51,19 @@ src/main/java/com/chc/dpgb
 │     ├─ LibraryBookController.java      # POST/GET /api/v1/library/books, GET/PATCH/DELETE /{bookId}, /order, /shelf, /progress
 │     ├─ ShelfController.java            # POST/GET /api/v1/library/shelves, PATCH/DELETE /{shelfId}, GET /{shelfId}/books
 │     └─ dto                             # openapi.yaml 스키마 1:1 대응 record. Bean Validation 미도입 — 필수/불변식 검증은 도메인 계층의 IllegalArgumentException을 서비스가 잡아 concrete 예외로 번역하는 방식으로 통일(컨트롤러는 primitive 언박싱이 필요한 필드의 null만 직접 체크)
+├─ discovery
+│  ├─ ExternalBook.java                  # record — 포트가 반환하는 공용 표현(외부 API 벤더 비의존), 컨트롤러가 그대로 응답에 사용
+│  ├─ BookDiscoveryClient.java           # 포트(순수 인터페이스) — List<ExternalBook> search(title, author)
+│  ├─ BookDiscoveryService.java          # title/author 둘 다 없으면 400(INVALID_SEARCH_PARAMETER), 있으면 포트에 위임. 생성자 주입 지점에 @Lazy(아래 aladin 패키지 참조)
+│  ├─ aladin                             # 알라딘 API 연동 구현 세부사항 — 전부 package-private, discovery 패키지 밖에서는 BookDiscoveryClient 포트만 보인다
+│  │  ├─ AladinBookDiscoveryClient.java  # @Component + @Lazy, RestClient로 실제 ItemSearch 호출. HTTP 200이어도 응답 바디의 errorCode가 있으면 AladinApiException(502)
+│  │  ├─ AladinSearchResponse.java       # 응답 DTO(record) — 미매핑 필드가 오면 역직렬화 실패(엄격 검증, ignoreUnknown 미사용)
+│  │  ├─ AladinItem.java                 # 응답 항목 DTO(record)
+│  │  ├─ AladinSubInfo.java              # itemPage(총 페이지) 등 optResult로 요청하는 부가 필드 — 실무에서 거의 항상 비어 있음(라이브 호출로 확인)
+│  │  └─ AuthorNameNormalizer.java       # "이름 (역할), 이름 (역할)" → "이름, 이름" 변환 순수 유틸
+│  └─ web
+│     ├─ BookDiscoveryController.java    # GET /api/v1/books/search
+│     └─ dto/BookSearchResponse.java     # { books: ExternalBook[] }
 └─ security
    ├─ SecurityConfig.java             # JwtDecoder/SecurityFilterChain/AuthenticationEntryPoint 빈
    ├─ JwtAuthenticationEntryPoint.java
@@ -59,7 +73,7 @@ src/main/java/com/chc/dpgb
       └─ ClientIdValidator.java       # client_id == 등록된 App Client
 
 src/main/resources
-├─ application.yaml          # 공통 설정 (JPA, Flyway 활성화, OAuth2 Resource Server issuer-uri/app-client-id)
+├─ application.yaml          # 공통 설정 (JPA, Flyway 활성화, OAuth2 Resource Server issuer-uri/app-client-id, book-service.aladin.ttb-key=${ALADIN_API_TTB_KEY})
 ├─ application-local.yaml    # 로컬 프로필 — docker-compose Postgres 기본값
 ├─ application-prod.yaml     # 운영 프로필 — 전부 env var, 기본값 없음
 └─ db/migration
@@ -75,6 +89,10 @@ src/test/java/com/chc/dpgb
 ├─ library/LibraryBookServiceTest.java    # Mockito 기반 — shelf 해석, 중복 409, reorder 검증/rebalance, moveShelf
 ├─ library/web/LibraryBookControllerTest.java  # @WebMvcTest — SecurityConfigTest 패턴 재사용, 컨트롤러 자체 검증(필수 필드 누락 400 등) 위주
 ├─ library/web/ShelfControllerTest.java        # @WebMvcTest
+├─ discovery/BookDiscoveryServiceTest.java      # Mockito
+├─ discovery/web/BookDiscoveryControllerTest.java  # @WebMvcTest
+├─ discovery/aladin/AuthorNameNormalizerTest.java  # 순수 함수 단위 테스트
+├─ discovery/aladin/AladinBookDiscoveryClientTest.java  # MockRestServiceServer + 실제로 캡처한 알라딘 응답 fixture(네트워크 미사용)
 └─ security/...  # validator/MemberIdResolver 단위 테스트, SecurityConfigTest
 
 src/integrationTest/java/com/chc/dpgb
@@ -90,6 +108,10 @@ src/integrationTest/resources
 
 docker-compose.yml  # 로컬 개발용 PostgreSQL (POSTGRES_DB/USER/PASSWORD=dpgb)
 ```
+
+## 비밀값
+
+`AUTH_ISSUER_URI`/`AUTH_APP_CLIENT_ID`/`ALADIN_API_TTB_KEY` 모두 env var로만 주입하고 `application*.yaml`에 기본값을 두지 않는다. 저장소 루트의 `.env`는 `.gitignore`에 등록되어 있지만, 이 애플리케이션은 `.env` 파일을 자동으로 읽지 않는다(dotenv 라이브러리 미도입) — 로컬 실행 시 셸 export나 IDE 실행 설정으로 실제 프로세스 환경변수에 주입해야 한다. 자격 증명이 필요한 빈(`SecurityConfig.jwtDecoder`, `AladinBookDiscoveryClient`)은 값이 없는 환경(CI, 다른 개발자)에서도 앱이 기동되도록 빈과 그 주입 지점 양쪽에 `@Lazy`를 붙인다 — 하나만 붙이면 다른 즉시 생성되는 빈의 생성자 인자로 해석될 때 여전히 즉시 생성된다(CLIAR-28에서 처음 발견, CLIAR-34에서 재확인).
 
 ## 서비스 경계
 
