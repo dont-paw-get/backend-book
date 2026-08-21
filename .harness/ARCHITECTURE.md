@@ -47,9 +47,15 @@ src/main/java/com/chc/dpgb
 │  ├─ ShelfService.java                 # getOrCreateDefaultShelf(동시성 처리)/createShelf/getShelves/updateShelf/deleteShelf(책 이동 후 삭제)
 │  ├─ ShelfRank.java                     # LexoRank pure 유틸(Spring 비의존) — initial/before/after/between/rebalancedSequence
 │  ├─ ShelfRankExhaustedException.java   # 키 공간 소진 내부 신호(API 미노출) — rebalance 트리거용
+│  ├─ Scrap.java                         # aggregate root(JPA entity) — 독립 memberId 없음, LibraryBook을 통해서만 귀속. create/update에 불변식(sentence 필수, pageNumber>=1) 캡슐화
+│  ├─ ScrapRepository.java               # 포트 — LibraryBookRepository/ShelfRepository와 동일한 패턴
+│  ├─ ScrapJpaRepository.java            # Spring Data JPA 인터페이스(package-private) — findByBookIdOrderByCreatedAtAsc(페이징)
+│  ├─ ScrapRepositoryJpaAdapter.java     # @Repository, save()는 saveAndFlush로 위임
+│  ├─ ScrapService.java                  # createScrap/getScraps(책 스코프, LibraryBookNotFound/AccessDenied로 검증) / getScrap/updateScrap/deleteScrap(스크랩 스코프, 스크랩→소속 책 조회 후 ScrapNotFound/AccessDenied로 검증)
 │  └─ web
 │     ├─ LibraryBookController.java      # POST/GET /api/v1/library/books, GET/PATCH/DELETE /{bookId}, /order, /shelf, /progress
 │     ├─ ShelfController.java            # POST/GET /api/v1/library/shelves, PATCH/DELETE /{shelfId}, GET /{shelfId}/books
+│     ├─ ScrapController.java            # 클래스 레벨 @RequestMapping 없이 두 베이스 경로(POST/GET /api/v1/library/books/{bookId}/scraps, GET/PATCH/DELETE /api/v1/library/scraps/{scrapId})를 메서드별 전체 경로로 처리 — 이 저장소 최초의 다중 베이스 경로 컨트롤러
 │     └─ dto                             # openapi.yaml 스키마 1:1 대응 record. Bean Validation 미도입 — 필수/불변식 검증은 도메인 계층의 IllegalArgumentException을 서비스가 잡아 concrete 예외로 번역하는 방식으로 통일(컨트롤러는 primitive 언박싱이 필요한 필드의 null만 직접 체크)
 ├─ discovery
 │  ├─ ExternalBook.java                  # record — 포트가 반환하는 공용 표현(외부 API 벤더 비의존), 컨트롤러가 그대로 응답에 사용
@@ -79,16 +85,20 @@ src/main/resources
 └─ db/migration
    ├─ V1__init.sql                     # baseline (빈 마이그레이션)
    ├─ V2__create_library_book.sql      # library_book 테이블 + unique 제약(member_id+isbn partial — isbn 없는 도서는 중복판정 안 함, ADR-0007)
-   └─ V3__add_shelf_and_rescope_library_book.sql  # shelf 테이블(+ 기본 책장 부분 unique 인덱스) 신설, library_book.shelf_id 추가(+ FK), shelfRank unique 제약을 member_id 전역→shelf_id 범위로 재조정(ADR-0008). V2는 develop에 이미 병합되어 직접 수정하지 않음
+   ├─ V3__add_shelf_and_rescope_library_book.sql  # shelf 테이블(+ 기본 책장 부분 unique 인덱스) 신설, library_book.shelf_id 추가(+ FK), shelfRank unique 제약을 member_id 전역→shelf_id 범위로 재조정(ADR-0008). V2는 develop에 이미 병합되어 직접 수정하지 않음
+   └─ V4__create_scrap.sql             # scrap 테이블 신설, book_id FK에 ON DELETE CASCADE(책 삭제 시 스크랩도 함께 삭제, CLIAR-45)
 
 src/test/java/com/chc/dpgb
 ├─ common/exception/GlobalExceptionHandlerTest.java
 ├─ library/ShelfRankTest.java
 ├─ library/LibraryBookTest.java
+├─ library/ScrapTest.java                 # 도메인 unit — sentence/pageNumber 불변식
 ├─ library/ShelfServiceTest.java          # Mockito 기반 애플리케이션 서비스 단위 테스트 — get-or-create 동시성, 소유권 404/403
 ├─ library/LibraryBookServiceTest.java    # Mockito 기반 — shelf 해석, 중복 409, reorder 검증/rebalance, moveShelf
+├─ library/ScrapServiceTest.java          # Mockito 기반 — 책 스코프/스크랩 스코프 소유권 403/404 각각 검증
 ├─ library/web/LibraryBookControllerTest.java  # @WebMvcTest — SecurityConfigTest 패턴 재사용, 컨트롤러 자체 검증(필수 필드 누락 400 등) 위주
 ├─ library/web/ShelfControllerTest.java        # @WebMvcTest
+├─ library/web/ScrapControllerTest.java        # @WebMvcTest
 ├─ discovery/BookDiscoveryServiceTest.java      # Mockito
 ├─ discovery/web/BookDiscoveryControllerTest.java  # @WebMvcTest
 ├─ discovery/aladin/AuthorNameNormalizerTest.java  # 순수 함수 단위 테스트
@@ -101,7 +111,8 @@ src/integrationTest/java/com/chc/dpgb
 ├─ RepositoryIntegrationTestSupport.java  # @DataJpaTest + AutoConfigureTestDatabase(NONE) + @ImportAutoConfiguration(FlywayAutoConfiguration) + TestcontainersConfiguration import
 ├─ DpgbApplicationTests.java              # IntegrationTestSupport 상속 (smoke test)
 ├─ library/LibraryBookRepositoryTest.java # RepositoryIntegrationTestSupport 상속 — 저장/조회, unique 제약(shelf_id 범위), FK
-└─ library/ShelfRepositoryTest.java       # RepositoryIntegrationTestSupport 상속 — 기본 책장 unique 제약, 목록 정렬
+├─ library/ShelfRepositoryTest.java       # RepositoryIntegrationTestSupport 상속 — 기본 책장 unique 제약, 목록 정렬
+└─ library/ScrapRepositoryTest.java       # RepositoryIntegrationTestSupport 상속 — 책별 목록 정렬, 책 삭제 시 cascade 삭제(TestEntityManager.clear()로 1차 캐시 우회)
 
 src/integrationTest/resources
 └─ testcontainers.properties  # testcontainers.reuse.enable=true
@@ -121,10 +132,10 @@ Book Service는 다른 Java 기반 MSA 서비스들과 PostgreSQL 인스턴스·
 
 ## 테스트 구조
 
-- `test`: 단위 테스트. DB 없음. `com.chc.dpgb.security` 패키지의 validator/`MemberIdResolver` 단위 테스트와 `SecurityConfigTest`/`GlobalExceptionHandlerTest`(`@WebMvcTest` + 테스트 전용 nested 컨트롤러), `com.chc.dpgb.library`의 `ShelfRankTest`/`LibraryBookTest`(Domain unit, Spring 컨텍스트 없음)가 있다.
+- `test`: 단위 테스트. DB 없음. `com.chc.dpgb.security` 패키지의 validator/`MemberIdResolver` 단위 테스트와 `SecurityConfigTest`/`GlobalExceptionHandlerTest`(`@WebMvcTest` + 테스트 전용 nested 컨트롤러), `com.chc.dpgb.library`의 `ShelfRankTest`/`LibraryBookTest`/`ScrapTest`(Domain unit, Spring 컨텍스트 없음)가 있다.
 - `integrationTest`: PostgreSQL Testcontainers 기반 통합 테스트. Gradle에 구성 완료 — `./gradlew integrationTest`로 단독 실행, `./gradlew check`가 `test`와 함께 실행. Docker(Docker Desktop 등)가 로컬에 떠 있어야 한다.
-- `RepositoryIntegrationTestSupport`(`@DataJpaTest`)가 CLIAR-31에서 처음 만들어졌다. `@DataJpaTest`의 큐레이션된 autoconfiguration 목록은 Flyway를 포함하지 않으므로 `@ImportAutoConfiguration(FlywayAutoConfiguration.class)`를 명시적으로 추가해야 `ddl-auto: validate`가 마이그레이션된 실제 스키마를 검증한다(`.harness/DECISIONS.md` 참조). 새 `*RepositoryImpl`을 추가할 때 이 기반 클래스를 상속한다.
-- 통합 테스트: `DpgbApplicationTests`(`IntegrationTestSupport` 상속, 빈 smoke test), `LibraryBookRepositoryTest`(`RepositoryIntegrationTestSupport` 상속).
+- `RepositoryIntegrationTestSupport`(`@DataJpaTest`)가 CLIAR-31에서 처음 만들어졌다. `@DataJpaTest`의 큐레이션된 autoconfiguration 목록은 Flyway를 포함하지 않으므로 `@ImportAutoConfiguration(FlywayAutoConfiguration.class)`를 명시적으로 추가해야 `ddl-auto: validate`가 마이그레이션된 실제 스키마를 검증한다(`.harness/DECISIONS.md` 참조). 새 `*RepositoryImpl`을 추가할 때 이 기반 클래스를 상속한다. DB 레벨 `ON DELETE CASCADE` 같은 부수효과를 검증할 때는 Hibernate 1차 캐시가 낡은 상태를 들고 있을 수 있어 `TestEntityManager`(`org.springframework.boot.jpa.test.autoconfigure`)의 `clear()`로 캐시를 비운 뒤 재조회해야 한다(`ScrapRepositoryTest`, CLIAR-45에서 확인).
+- 통합 테스트: `DpgbApplicationTests`(`IntegrationTestSupport` 상속, 빈 smoke test), `LibraryBookRepositoryTest`/`ShelfRepositoryTest`/`ScrapRepositoryTest`(`RepositoryIntegrationTestSupport` 상속).
 
 ## API 문서
 
