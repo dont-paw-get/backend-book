@@ -2,15 +2,6 @@
 
 완료된 항목은 여기 체크만 남기지 않고 `STATE.md`로 옮긴 뒤 이 문서에서 제거한다.
 
-## Book Discovery API (외부 연동)
-
-알라딘 API 연동이 필요하다(CLIAR-43에서 OCR/AI 분석은 범위에서 삭제됨 — 다른 컴포넌트 담당). 자격 증명·endpoint가 아직 없으므로 어댑터 인터페이스 + 스텁 구현으로 먼저 격리하고, 실제 연동은 자격 증명 확보 시점에 스텁을 교체한다.
-
-- [ ] `GET /api/v1/books/search`(`searchBookInfo`) — 알라딘 API 어댑터(title/author 검색), 결과 없으면 200 + 빈 배열, 응답 필드는 알라딘이 제공하는 항목(title/author/isbn13/publisher/pub_date/cover_url)으로 한정
-- [ ] `author` 정규화 — 알라딘 응답의 "이름 (역할)" 결합 문자열에서 역할 라벨("지은이"/"옮긴이"/"편역" 등)을 제거하고 이름만 쉼표로 join해 반환하는 로직(어댑터 또는 별도 정규화 컴포넌트)
-- [ ] `totalPages`는 알라딘 응답에 없는 경우가 대부분이므로 어댑터가 값을 억지로 채우지 않고 생략(optional) 처리
-- [ ] 어댑터는 인터페이스로 분리해 계약 테스트에서 목킹 가능하게 함
-
 ## Scrap CRUD API (신규, CLIAR-43)
 
 `.harness/DOMAIN.md`의 Scrap aggregate 규칙을 구현 기준으로 삼는다. 스크랩은 LibraryBook 소유자(`memberId`) 기준으로 접근 권한을 검증한다.

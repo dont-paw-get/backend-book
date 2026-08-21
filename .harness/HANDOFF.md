@@ -151,3 +151,23 @@ CLIAR-29가 커밋·PR·`develop` 병합까지 완료된 상태로 이미 `CLIAR
 커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
 
 다음 세션 시작 시: 이번 CLIAR-32 구현(Shelf 전체, LibraryBook 재조정, controller/service, DTO, 신규 예외 6종, `V3` 마이그레이션, 테스트)이 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 사용자에게 먼저 확인한다. 그다음 `.harness/PLAN.md`의 다음 섹션("Book Discovery API" 외부 연동, "Scrap CRUD API", "Librarian API" 중 하나) 또는 "계약 테스트 전수화" 보강을 진행할지 사용자에게 확인한다.
+
+## 2026-08-21 (계속): Book Discovery API 구현 — 스텁 대신 실제 알라딘 연동 (CLIAR-34)
+
+이미 체크아웃되어 있던 `CLIAR-34-Book-Discovery-API-외부-연동` 브랜치에서 시작했다. PLAN.md에는 "자격 증명이 없으니 어댑터+스텁"으로 계획되어 있었는데, 구현 도중 사용자가 IDE 선택으로 `.env` 파일의 `ALADIN_API_TTB_KEY`(실제 알라딘 TTBKey)를 알려줘서 스텁 없이 바로 실제 연동을 구현하는 것으로 방향을 바꿨다. (직전에 스텁 vs 실연동을 묻는 `AskUserQuestion`을 한 번 거부당했었는데, 이 시점에 실제 키를 알려준 것으로 보아 굳이 다시 물을 필요 없이 진행하면 되는 상황이었다.)
+
+`.env`는 `.gitignore`에 이미 등록되어 있어 안전하게 값을 확인했다(`git ls-files .env` 결과 없음). 이 앱이 `.env`를 자동으로 읽는 메커니즘이 없다는 것도 확인했다 — 기존 `AUTH_ISSUER_URI`/`AUTH_APP_CLIENT_ID`와 동일하게 순수 env var 주입 방식을 따르기로 하고, `application.yaml`에 `book-service.aladin.ttb-key: ${ALADIN_API_TTB_KEY}`(기본값 없음)를 추가했다.
+
+구현 전에 실제 알라딘 API를 라이브로 여러 번 호출해(curl, TTBKey 사용) 응답 형태를 직접 확인했다 — 문서(DECISIONS.md 2026-08-20)에는 없던 사실 세 가지를 새로 발견했다: (1) 알라딘은 오류도 HTTP 200으로 응답하고 바디에 `{"errorCode":..,"errorMessage":..}`를 담는다 — HTTP status 기반 예외 처리로는 절대 못 잡는다. (2) `OptResult=itemPage`를 붙여도 `subInfo.itemPage`는 테스트한 모든 검색에서 빈 객체였다 — "totalPages 대부분 없음" 결정이 실측으로 재확인됐다. (3) `isbn`(10자리) 필드가 "K"로 시작하는 알라딘 내부 코드인 경우가 실제로 있고, `isbn13`(13자리)은 항상 정상적인 숫자였다.
+
+구현: `com.chc.dpgb.discovery` 패키지 — `ExternalBook`(record, 포트 반환 타입), `BookDiscoveryClient`(포트), `BookDiscoveryService`(title/author 둘 다 없으면 400). 실제 알라딘 연동은 `com.chc.dpgb.discovery.aladin` 하위에 전부 package-private로 격리 — `AladinBookDiscoveryClient`(`RestClient` 사용, title만/author만/둘다 있음에 따라 QueryType을 Title/Author/Keyword로 분기), `AladinSearchResponse`/`AladinItem`/`AladinSubInfo`(`@JsonIgnoreProperties(ignoreUnknown = true)`), `AuthorNameNormalizer`(역할 라벨 제거, 이미 DOMAIN.md에 서술된 규칙 그대로 구현). `com.chc.dpgb.discovery.web`에 `BookDiscoveryController`(`GET /api/v1/books/search`) + `BookSearchResponse` DTO.
+
+구현 중 겪은 문제 둘: (1) `RestClient.Builder`가 `spring-boot-starter-webmvc`만으로 자동구성되지 않아(Boot 4.1 세분화 모듈) `./gradlew integrationTest`가 `NoSuchBeanDefinitionException`으로 실패 — `spring-boot-starter-restclient`를 `build.gradle`에 추가해 해결. (2) `AladinBookDiscoveryClient`(TTBKey를 `@Value`로 읽는 빈)에 `@Lazy`만 붙이고 `BookDiscoveryService` 생성자 주입 지점에는 안 붙였더니, `ALADIN_API_TTB_KEY`가 없는 이 세션의 실행 셸에서 `./gradlew integrationTest`가 즉시 실패 — CLIAR-28의 `JwtDecoder` 때와 똑같은 원인이라 같은 해법(양쪽 `@Lazy`)을 적용해 해결. 둘 다 `.harness/DECISIONS.md`에 기록.
+
+테스트: `AuthorNameNormalizerTest`(순수 함수), `AladinBookDiscoveryClientTest`(`MockRestServiceServer`에 라이브 호출로 캡처한 실제 응답 JSON을 fixture로 사용 — 네트워크 미사용, QueryType 분기·author 정규화·isbn13 우선순위·errorCode→502 변환 검증), `BookDiscoveryServiceTest`(Mockito), `BookDiscoveryControllerTest`(`@WebMvcTest`). `ALADIN_API_TTB_KEY`를 설정하지 않은 채로 `./gradlew check`(Docker Desktop 기동, 실제 PostgreSQL)를 실행해 앱이 정상 기동하는 것도 재확인했다.
+
+`.harness/PLAN.md`에서 "Book Discovery API" 섹션 제거, `.harness/STATE.md`에 단계 요약 반영, `.harness/ARCHITECTURE.md`(discovery 패키지 구조, `spring-boot-starter-restclient`, 비밀값/`.env`/`@Lazy` 컨벤션을 다루는 새 절), `.harness/DECISIONS.md`(라이브 호출로 확인한 사실들과 두 가지 문제 해결 기록), `.harness/BACKLOG.md`(dotenv 도입 검토, Aladin 호출량 제한 대비 없음)에 반영했다.
+
+커밋 여부는 아직 사용자에게 확인받지 않았다.
+
+다음 세션 시작 시: 이번 CLIAR-34 구현이 커밋됐는지 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. `.env` 파일 자체는 계속 untracked 상태로 남아있어야 하므로 커밋 시 실수로 포함되지 않는지 다시 한번 확인할 것. 그다음 `.harness/PLAN.md`의 남은 섹션("Scrap CRUD API", "Librarian API", "계약 테스트 전수화") 중 무엇을 진행할지 사용자에게 확인한다.

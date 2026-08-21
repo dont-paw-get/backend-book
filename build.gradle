@@ -40,6 +40,9 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	implementation 'org.flywaydb:flyway-core'
 	implementation 'org.flywaydb:flyway-database-postgresql'
+	// RestClient.Builder 자동 구성(RestClientAutoConfiguration)이 spring-boot-starter-webmvc에
+	// 딸려오지 않는다 — Book Discovery(알라딘 API 연동)의 AladinBookDiscoveryClient가 사용
+	implementation 'org.springframework.boot:spring-boot-starter-restclient'
 	compileOnly 'org.projectlombok:lombok'
 	runtimeOnly 'org.postgresql:postgresql'
 	annotationProcessor 'org.projectlombok:lombok'

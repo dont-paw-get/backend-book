@@ -10,57 +10,60 @@ import org.springframework.stereotype.Repository;
 @Repository
 class LibraryBookRepositoryJpaAdapter implements LibraryBookRepository {
 
-	private final LibraryBookJpaRepository jpaRepository;
+    private final LibraryBookJpaRepository jpaRepository;
 
-	LibraryBookRepositoryJpaAdapter(LibraryBookJpaRepository jpaRepository) {
-		this.jpaRepository = jpaRepository;
-	}
+    LibraryBookRepositoryJpaAdapter(LibraryBookJpaRepository jpaRepository) {
+        this.jpaRepository = jpaRepository;
+    }
 
-	@Override
-	public LibraryBook save(LibraryBook libraryBook) {
-		return jpaRepository.saveAndFlush(libraryBook);
-	}
+    @Override
+    public LibraryBook save(LibraryBook libraryBook) {
+        return jpaRepository.saveAndFlush(libraryBook);
+    }
 
-	@Override
-	public void delete(LibraryBook libraryBook) {
-		jpaRepository.delete(libraryBook);
-	}
+    @Override
+    public void delete(LibraryBook libraryBook) {
+        jpaRepository.delete(libraryBook);
+    }
 
-	@Override
-	public Optional<LibraryBook> findById(Long bookId) {
-		return jpaRepository.findById(bookId);
-	}
+    @Override
+    public Optional<LibraryBook> findById(Long bookId) {
+        return jpaRepository.findById(bookId);
+    }
 
-	@Override
-	public List<LibraryBook> findShelfOrderedByRank(Long shelfId) {
-		return jpaRepository.findByShelfIdOrderByShelfRankAsc(shelfId);
-	}
+    @Override
+    public List<LibraryBook> findShelfOrderedByRank(Long shelfId) {
+        return jpaRepository.findByShelfIdOrderByShelfRankAsc(shelfId);
+    }
 
-	@Override
-	public Optional<LibraryBook> findLastRanked(Long shelfId) {
-		return jpaRepository.findTopByShelfIdOrderByShelfRankDesc(shelfId);
-	}
+    @Override
+    public Optional<LibraryBook> findLastRanked(Long shelfId) {
+        return jpaRepository.findTopByShelfIdOrderByShelfRankDesc(shelfId);
+    }
 
-	@Override
-	public boolean existsByIsbn(String memberId, String isbn) {
-		return jpaRepository.existsByMemberIdAndIsbn(memberId, isbn);
-	}
+    @Override
+    public boolean existsByIsbn(String memberId, String isbn) {
+        return jpaRepository.existsByMemberIdAndIsbn(memberId, isbn);
+    }
 
-	@Override
-	public long countByShelfId(Long shelfId) {
-		return jpaRepository.countByShelfId(shelfId);
-	}
+    @Override
+    public long countByShelfId(Long shelfId) {
+        return jpaRepository.countByShelfId(shelfId);
+    }
 
-	@Override
-	public Page<LibraryBook> findPage(String memberId, Long shelfId, String author, Pageable pageable) {
-		return jpaRepository.findPage(memberId, shelfId, author, pageable);
-	}
+    @Override
+    public Page<LibraryBook> findPage(
+            String memberId, Long shelfId, String author, Pageable pageable
+    ) {
+        return jpaRepository.findPage(memberId, shelfId, author, pageable);
+    }
 
-	@Override
-	public Page<LibraryBook> findPageOrderByProgress(
-			String memberId, Long shelfId, String author, boolean ascending, Pageable pageable) {
-		return ascending
-				? jpaRepository.findPageOrderByProgressAsc(memberId, shelfId, author, pageable)
-				: jpaRepository.findPageOrderByProgressDesc(memberId, shelfId, author, pageable);
-	}
+    @Override
+    public Page<LibraryBook> findPageOrderByProgress(
+            String memberId, Long shelfId, String author, boolean ascending, Pageable pageable
+    ) {
+        return ascending
+                ? jpaRepository.findPageOrderByProgressAsc(memberId, shelfId, author, pageable)
+                : jpaRepository.findPageOrderByProgressDesc(memberId, shelfId, author, pageable);
+    }
 }

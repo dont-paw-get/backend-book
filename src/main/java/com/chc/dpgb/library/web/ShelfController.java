@@ -36,57 +36,63 @@ import com.chc.dpgb.security.MemberIdResolver;
 @RequestMapping("/api/v1/library/shelves")
 public class ShelfController {
 
-	private final ShelfService shelfService;
-	private final LibraryBookService libraryBookService;
+    private final ShelfService shelfService;
+    private final LibraryBookService libraryBookService;
 
-	ShelfController(ShelfService shelfService, LibraryBookService libraryBookService) {
-		this.shelfService = shelfService;
-		this.libraryBookService = libraryBookService;
-	}
+    ShelfController(ShelfService shelfService, LibraryBookService libraryBookService) {
+        this.shelfService = shelfService;
+        this.libraryBookService = libraryBookService;
+    }
 
-	@PostMapping
-	@ResponseStatus(HttpStatus.CREATED)
-	public CreateShelfResponse createShelf(@AuthenticationPrincipal Jwt jwt, @RequestBody CreateShelfRequest request) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		Shelf shelf = shelfService.createShelf(memberId, request.name());
-		return CreateShelfResponse.from(shelf);
-	}
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public CreateShelfResponse createShelf(
+            @AuthenticationPrincipal Jwt jwt, @RequestBody CreateShelfRequest request
+    ) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        Shelf shelf = shelfService.createShelf(memberId, request.name());
+        return CreateShelfResponse.from(shelf);
+    }
 
-	@GetMapping
-	public ShelfListResponse getShelves(@AuthenticationPrincipal Jwt jwt) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		List<Shelf> shelves = shelfService.getShelves(memberId);
-		List<ShelfSummary> summaries = shelves.stream()
-				.map(shelf -> ShelfSummary.of(shelf, shelfService.bookCount(shelf.getShelfId())))
-				.toList();
-		return new ShelfListResponse(summaries);
-	}
+    @GetMapping
+    public ShelfListResponse getShelves(@AuthenticationPrincipal Jwt jwt) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        List<Shelf> shelves = shelfService.getShelves(memberId);
+        List<ShelfSummary> summaries = shelves.stream()
+                .map(shelf -> ShelfSummary.of(shelf, shelfService.bookCount(shelf.getShelfId())))
+                .toList();
+        return new ShelfListResponse(summaries);
+    }
 
-	@PatchMapping("/{shelfId}")
-	public UpdateShelfResponse updateShelf(
-			@AuthenticationPrincipal Jwt jwt, @PathVariable Long shelfId, @RequestBody UpdateShelfRequest request) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		Shelf shelf = shelfService.updateShelf(memberId, shelfId, request.name());
-		return UpdateShelfResponse.from(shelf);
-	}
+    @PatchMapping("/{shelfId}")
+    public UpdateShelfResponse updateShelf(
+            @AuthenticationPrincipal Jwt jwt, @PathVariable Long shelfId,
+            @RequestBody UpdateShelfRequest request
+    ) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        Shelf shelf = shelfService.updateShelf(memberId, shelfId, request.name());
+        return UpdateShelfResponse.from(shelf);
+    }
 
-	@DeleteMapping("/{shelfId}")
-	@ResponseStatus(HttpStatus.NO_CONTENT)
-	public void deleteShelf(@AuthenticationPrincipal Jwt jwt, @PathVariable Long shelfId) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		shelfService.deleteShelf(memberId, shelfId);
-	}
+    @DeleteMapping("/{shelfId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteShelf(@AuthenticationPrincipal Jwt jwt, @PathVariable Long shelfId) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        shelfService.deleteShelf(memberId, shelfId);
+    }
 
-	@GetMapping("/{shelfId}/books")
-	public LibraryBookPageResponse getShelfBooks(
-			@AuthenticationPrincipal Jwt jwt, @PathVariable Long shelfId,
-			@RequestParam(required = false, defaultValue = "0") int page,
-			@RequestParam(required = false, defaultValue = "20") int size) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		shelfService.getOwnedShelf(memberId, shelfId);
-		LibraryBookController.validatePaging(page, size);
-		Page<LibraryBook> result = libraryBookService.getLibraryBooks(
-				memberId, shelfId, null, LibrarySortBy.SHELF_ORDER, Sort.Direction.ASC, page, size);
-		return LibraryBookPageResponse.from(result);
-	}
+    @GetMapping("/{shelfId}/books")
+    public LibraryBookPageResponse getShelfBooks(
+            @AuthenticationPrincipal Jwt jwt, @PathVariable Long shelfId,
+            @RequestParam(required = false, defaultValue = "0") int page,
+            @RequestParam(required = false, defaultValue = "20") int size
+    ) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        shelfService.getOwnedShelf(memberId, shelfId);
+        LibraryBookController.validatePaging(page, size);
+        Page<LibraryBook> result = libraryBookService.getLibraryBooks(
+                memberId, shelfId, null, LibrarySortBy.SHELF_ORDER, Sort.Direction.ASC, page, size
+        );
+        return LibraryBookPageResponse.from(result);
+    }
 }

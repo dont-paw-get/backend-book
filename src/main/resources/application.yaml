@@ -17,3 +17,5 @@ book-service:
   security:
     cognito:
       app-client-id: ${AUTH_APP_CLIENT_ID}
+  aladin:
+    ttb-key: ${ALADIN_API_TTB_KEY}

@@ -6,7 +6,7 @@ import com.chc.dpgb.library.LibraryBook;
 
 public record ReorderLibraryBookResponse(Long bookId, String shelfRank, Instant updatedAt) {
 
-	public static ReorderLibraryBookResponse from(LibraryBook book) {
-		return new ReorderLibraryBookResponse(book.getBookId(), book.getShelfRank(), book.getUpdatedAt());
-	}
+    public static ReorderLibraryBookResponse from(LibraryBook book) {
+        return new ReorderLibraryBookResponse(book.getBookId(), book.getShelfRank(), book.getUpdatedAt());
+    }
 }
