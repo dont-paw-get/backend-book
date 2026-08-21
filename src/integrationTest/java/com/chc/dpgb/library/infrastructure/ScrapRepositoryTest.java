@@ -1,4 +1,4 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -11,6 +11,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 
 import com.chc.dpgb.RepositoryIntegrationTestSupport;
+import com.chc.dpgb.library.domain.LibraryBook;
+import com.chc.dpgb.library.domain.Scrap;
+import com.chc.dpgb.library.domain.Shelf;
 
 class ScrapRepositoryTest extends RepositoryIntegrationTestSupport {
 

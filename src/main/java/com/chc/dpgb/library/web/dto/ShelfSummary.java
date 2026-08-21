@@ -1,6 +1,6 @@
 package com.chc.dpgb.library.web.dto;
 
-import com.chc.dpgb.library.Shelf;
+import com.chc.dpgb.library.domain.Shelf;
 
 public record ShelfSummary(Long shelfId, String name, boolean isDefault, int bookCount) {
 

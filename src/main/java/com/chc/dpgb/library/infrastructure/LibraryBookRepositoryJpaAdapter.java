@@ -1,4 +1,4 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.infrastructure;
 
 import java.util.List;
 import java.util.Optional;
@@ -6,6 +6,9 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
+
+import com.chc.dpgb.library.application.LibraryBookRepository;
+import com.chc.dpgb.library.domain.LibraryBook;
 
 @Repository
 class LibraryBookRepositoryJpaAdapter implements LibraryBookRepository {

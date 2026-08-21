@@ -1,7 +1,9 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.application;
 
 import java.util.List;
 import java.util.Optional;
+
+import com.chc.dpgb.library.domain.Shelf;
 
 public interface ShelfRepository {
 

@@ -1,4 +1,4 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.application;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -18,6 +18,10 @@ import com.chc.dpgb.common.exception.InvalidReorderTargetException;
 import com.chc.dpgb.common.exception.InvalidShelfTargetException;
 import com.chc.dpgb.common.exception.LibraryBookAccessDeniedException;
 import com.chc.dpgb.common.exception.LibraryBookNotFoundException;
+import com.chc.dpgb.library.domain.LibraryBook;
+import com.chc.dpgb.library.domain.Shelf;
+import com.chc.dpgb.library.domain.ShelfRank;
+import com.chc.dpgb.library.domain.ShelfRankExhaustedException;
 
 @Service
 public class LibraryBookService {

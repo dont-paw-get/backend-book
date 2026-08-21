@@ -1,6 +1,6 @@
 package com.chc.dpgb.library.web.dto;
 
-import com.chc.dpgb.library.LibraryBook;
+import com.chc.dpgb.library.domain.LibraryBook;
 
 public record CreateLibraryBookResponse(
         Long bookId,

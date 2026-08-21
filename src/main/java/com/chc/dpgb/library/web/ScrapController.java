@@ -14,8 +14,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.chc.dpgb.library.Scrap;
-import com.chc.dpgb.library.ScrapService;
+import com.chc.dpgb.library.application.ScrapService;
+import com.chc.dpgb.library.domain.Scrap;
 import com.chc.dpgb.library.web.dto.CreateScrapRequest;
 import com.chc.dpgb.library.web.dto.ScrapDetailResponse;
 import com.chc.dpgb.library.web.dto.ScrapPageResponse;

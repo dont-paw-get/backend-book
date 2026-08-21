@@ -2,7 +2,7 @@ package com.chc.dpgb.library.web.dto;
 
 import java.time.Instant;
 
-import com.chc.dpgb.library.Shelf;
+import com.chc.dpgb.library.domain.Shelf;
 
 public record CreateShelfResponse(Long shelfId, String name, boolean isDefault, Instant createdAt) {
 

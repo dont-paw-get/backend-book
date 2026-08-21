@@ -27,8 +27,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import com.chc.dpgb.common.exception.GlobalExceptionHandler;
-import com.chc.dpgb.library.Scrap;
-import com.chc.dpgb.library.ScrapService;
+import com.chc.dpgb.library.application.ScrapService;
+import com.chc.dpgb.library.domain.Scrap;
 import com.chc.dpgb.security.SecurityConfig;
 
 @WebMvcTest(controllers = ScrapController.class)

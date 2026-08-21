@@ -4,7 +4,7 @@ import java.util.List;
 
 import org.springframework.data.domain.Page;
 
-import com.chc.dpgb.library.LibraryBook;
+import com.chc.dpgb.library.domain.LibraryBook;
 
 public record LibraryBookPageResponse(
         List<LibraryBookSummary> books,

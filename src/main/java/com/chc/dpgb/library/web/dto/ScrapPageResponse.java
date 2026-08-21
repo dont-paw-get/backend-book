@@ -4,7 +4,7 @@ import java.util.List;
 
 import org.springframework.data.domain.Page;
 
-import com.chc.dpgb.library.Scrap;
+import com.chc.dpgb.library.domain.Scrap;
 
 public record ScrapPageResponse(
         List<ScrapSummary> scraps,

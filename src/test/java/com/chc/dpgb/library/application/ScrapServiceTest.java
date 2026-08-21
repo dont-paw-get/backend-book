@@ -1,4 +1,4 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -20,6 +20,8 @@ import com.chc.dpgb.common.exception.LibraryBookAccessDeniedException;
 import com.chc.dpgb.common.exception.LibraryBookNotFoundException;
 import com.chc.dpgb.common.exception.ScrapAccessDeniedException;
 import com.chc.dpgb.common.exception.ScrapNotFoundException;
+import com.chc.dpgb.library.domain.LibraryBook;
+import com.chc.dpgb.library.domain.Scrap;
 
 @ExtendWith(MockitoExtension.class)
 class ScrapServiceTest {

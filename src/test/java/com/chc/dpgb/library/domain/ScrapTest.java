@@ -1,4 +1,4 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.domain;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

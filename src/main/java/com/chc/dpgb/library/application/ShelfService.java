@@ -1,4 +1,4 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.application;
 
 import java.util.List;
 import java.util.Optional;
@@ -11,6 +11,9 @@ import com.chc.dpgb.common.exception.DefaultShelfCannotBeDeletedException;
 import com.chc.dpgb.common.exception.InvalidShelfDataException;
 import com.chc.dpgb.common.exception.ShelfAccessDeniedException;
 import com.chc.dpgb.common.exception.ShelfNotFoundException;
+import com.chc.dpgb.library.domain.LibraryBook;
+import com.chc.dpgb.library.domain.Shelf;
+import com.chc.dpgb.library.domain.ShelfRank;
 
 @Service
 public class ShelfService {

@@ -33,25 +33,28 @@ src/main/java/com/chc/dpgb
 │     ├─ BadGatewayException.java     # abstract, 502
 │     ├─ GlobalExceptionHandler.java  # @RestControllerAdvice — 5개 abstract 타입 + 500 fallback(INTERNAL_ERROR)을 ErrorResponse로 매핑
 │     └─ (stable error code별 concrete 예외 13종 — InvalidSearchParameterException 등, openapi.yaml의 components.responses.* 기준)
-├─ library
-│  ├─ LibraryBook.java                   # aggregate root(JPA entity) — register/updateMetadata/updateProgress/changeShelfRank/changeShelfId에 불변식 캡슐화
-│  ├─ LibraryBookRepository.java         # 포트(순수 인터페이스, Spring Data 비의존) — 서비스 계층이 의존하는 도메인 메서드명
-│  ├─ LibraryBookJpaRepository.java      # Spring Data JPA 인터페이스(package-private) — 파생 쿼리 메서드명 + 필터/정렬용 @Query, 포트 구현체 내부에서만 사용
-│  ├─ LibraryBookRepositoryJpaAdapter.java  # @Repository, LibraryBookRepository 구현 — LibraryBookJpaRepository로 위임, save()는 saveAndFlush로 위임해 unique 제약 위반을 호출 시점에 동기적으로 드러냄
-│  ├─ LibraryBookService.java            # 애플리케이션 서비스 — CRUD/reorder/moveShelf/progress 유스케이스, 소유권 검증(404→403 순서), shelfRank 계산·rebalance 오케스트레이션. 쓰기가 없는 메서드(getLibraryBooks/getLibraryBook)는 `@Transactional(readOnly = true)` — PostgreSQL이 read-only transaction을 지원해 그 안에서 쓰기 시도 시 DB가 거부한다. get-or-create처럼 조회 중 쓰기가 발생할 수 있는 메서드(`ShelfService.getShelves`)는 readOnly로 표시하지 않는다
-│  ├─ LibrarySortBy.java                 # getLibraryBooks의 sortBy enum(SHELF_ORDER/TITLE/AUTHOR/CREATED_AT/PROGRESS)
-│  ├─ Shelf.java                         # aggregate root(JPA entity) — create/rename, isDefault는 서버 전용
-│  ├─ ShelfRepository.java               # 포트 — LibraryBookRepository와 동일한 패턴
-│  ├─ ShelfJpaRepository.java            # Spring Data JPA 인터페이스(package-private)
-│  ├─ ShelfRepositoryJpaAdapter.java     # @Repository, save()는 saveAndFlush로 위임(기본 책장 get-or-create 동시성 처리용)
-│  ├─ ShelfService.java                 # getOrCreateDefaultShelf(동시성 처리)/createShelf/getShelves/updateShelf/deleteShelf(책 이동 후 삭제)
-│  ├─ ShelfRank.java                     # LexoRank pure 유틸(Spring 비의존) — initial/before/after/between/rebalancedSequence
-│  ├─ ShelfRankExhaustedException.java   # 키 공간 소진 내부 신호(API 미노출) — rebalance 트리거용
-│  ├─ Scrap.java                         # aggregate root(JPA entity) — 독립 memberId 없음, LibraryBook을 통해서만 귀속. create/update에 불변식(sentence 필수, pageNumber>=1) 캡슐화
-│  ├─ ScrapRepository.java               # 포트 — LibraryBookRepository/ShelfRepository와 동일한 패턴
-│  ├─ ScrapJpaRepository.java            # Spring Data JPA 인터페이스(package-private) — findByBookIdOrderByCreatedAtAsc(페이징)
-│  ├─ ScrapRepositoryJpaAdapter.java     # @Repository, save()는 saveAndFlush로 위임
-│  ├─ ScrapService.java                  # createScrap/getScraps(책 스코프, LibraryBookNotFound/AccessDenied로 검증) / getScrap/updateScrap/deleteScrap(스크랩 스코프, 스크랩→소속 책 조회 후 ScrapNotFound/AccessDenied로 검증)
+├─ library                                # domain/application/infrastructure/web 4계층 서브패키지로 분리(기계적 리팩터링, 동작 변경 없음 — library 패키지가 40개 파일까지 커져 경계가 흐려지기 시작한 시점에 분리)
+│  ├─ domain                             # 순수 도메인 모델. Spring 비의존(JPA 애노테이션은 예외 — entity 자체이므로), 포트/서비스가 이 계층을 참조
+│  │  ├─ LibraryBook.java                # aggregate root(JPA entity) — register/updateMetadata/updateProgress/changeShelfRank/changeShelfId에 불변식 캡슐화
+│  │  ├─ Shelf.java                      # aggregate root(JPA entity) — create/rename, isDefault는 서버 전용
+│  │  ├─ ShelfRank.java                  # LexoRank pure 유틸(Spring 비의존) — initial/before/after/between/rebalancedSequence
+│  │  ├─ ShelfRankExhaustedException.java  # 키 공간 소진 내부 신호(API 미노출) — rebalance 트리거용
+│  │  └─ Scrap.java                      # aggregate root(JPA entity) — 독립 memberId 없음, LibraryBook을 통해서만 귀속. create/update에 불변식(sentence 필수, pageNumber>=1) 캡슐화
+│  ├─ application                        # 유스케이스 서비스 + 포트(Repository 인터페이스). web이 참조하고, infrastructure가 포트를 구현
+│  │  ├─ LibraryBookRepository.java      # 포트(순수 인터페이스, Spring Data 비의존) — 서비스 계층이 의존하는 도메인 메서드명
+│  │  ├─ LibraryBookService.java         # CRUD/reorder/moveShelf/progress 유스케이스, 소유권 검증(404→403 순서), shelfRank 계산·rebalance 오케스트레이션. 쓰기가 없는 메서드(getLibraryBooks/getLibraryBook)는 `@Transactional(readOnly = true)` — PostgreSQL이 read-only transaction을 지원해 그 안에서 쓰기 시도 시 DB가 거부한다. get-or-create처럼 조회 중 쓰기가 발생할 수 있는 메서드(`ShelfService.getShelves`)는 readOnly로 표시하지 않는다
+│  │  ├─ LibrarySortBy.java              # getLibraryBooks의 sortBy enum(SHELF_ORDER/TITLE/AUTHOR/CREATED_AT/PROGRESS) — web 컨트롤러가 쿼리 파라미터를 파싱해 이 타입으로 서비스에 전달
+│  │  ├─ ShelfRepository.java            # 포트 — LibraryBookRepository와 동일한 패턴
+│  │  ├─ ShelfService.java               # getOrCreateDefaultShelf(동시성 처리)/createShelf/getShelves/updateShelf/deleteShelf(책 이동 후 삭제)
+│  │  ├─ ScrapRepository.java            # 포트 — LibraryBookRepository/ShelfRepository와 동일한 패턴
+│  │  └─ ScrapService.java               # createScrap/getScraps(책 스코프, LibraryBookNotFound/AccessDenied로 검증) / getScrap/updateScrap/deleteScrap(스크랩 스코프, 스크랩→소속 책 조회 후 ScrapNotFound/AccessDenied로 검증)
+│  ├─ infrastructure                     # 포트 구현체(JPA 어댑터). application의 포트를 구현하고 domain 엔티티를 다룸
+│  │  ├─ LibraryBookJpaRepository.java   # Spring Data JPA 인터페이스(package-private) — 파생 쿼리 메서드명 + 필터/정렬용 @Query, 같은 서브패키지의 Adapter 내부에서만 사용
+│  │  ├─ LibraryBookRepositoryJpaAdapter.java  # @Repository, LibraryBookRepository(포트) 구현 — LibraryBookJpaRepository로 위임, save()는 saveAndFlush로 위임해 unique 제약 위반을 호출 시점에 동기적으로 드러냄
+│  │  ├─ ShelfJpaRepository.java         # Spring Data JPA 인터페이스(package-private)
+│  │  ├─ ShelfRepositoryJpaAdapter.java  # @Repository, save()는 saveAndFlush로 위임(기본 책장 get-or-create 동시성 처리용)
+│  │  ├─ ScrapJpaRepository.java         # Spring Data JPA 인터페이스(package-private) — findByBookIdOrderByCreatedAtAsc(페이징)
+│  │  └─ ScrapRepositoryJpaAdapter.java  # @Repository, save()는 saveAndFlush로 위임
 │  └─ web
 │     ├─ LibraryBookController.java      # POST/GET /api/v1/library/books, GET/PATCH/DELETE /{bookId}, /order, /shelf, /progress
 │     ├─ ShelfController.java            # POST/GET /api/v1/library/shelves, PATCH/DELETE /{shelfId}, GET /{shelfId}/books
@@ -90,12 +93,12 @@ src/main/resources
 
 src/test/java/com/chc/dpgb
 ├─ common/exception/GlobalExceptionHandlerTest.java
-├─ library/ShelfRankTest.java
-├─ library/LibraryBookTest.java
-├─ library/ScrapTest.java                 # 도메인 unit — sentence/pageNumber 불변식
-├─ library/ShelfServiceTest.java          # Mockito 기반 애플리케이션 서비스 단위 테스트 — get-or-create 동시성, 소유권 404/403
-├─ library/LibraryBookServiceTest.java    # Mockito 기반 — shelf 해석, 중복 409, reorder 검증/rebalance, moveShelf
-├─ library/ScrapServiceTest.java          # Mockito 기반 — 책 스코프/스크랩 스코프 소유권 403/404 각각 검증
+├─ library/domain/ShelfRankTest.java
+├─ library/domain/LibraryBookTest.java
+├─ library/domain/ScrapTest.java                 # 도메인 unit — sentence/pageNumber 불변식
+├─ library/application/ShelfServiceTest.java      # Mockito 기반 애플리케이션 서비스 단위 테스트 — get-or-create 동시성, 소유권 404/403
+├─ library/application/LibraryBookServiceTest.java  # Mockito 기반 — shelf 해석, 중복 409, reorder 검증/rebalance, moveShelf
+├─ library/application/ScrapServiceTest.java      # Mockito 기반 — 책 스코프/스크랩 스코프 소유권 403/404 각각 검증
 ├─ library/web/LibraryBookControllerTest.java  # @WebMvcTest — SecurityConfigTest 패턴 재사용, 컨트롤러 자체 검증(필수 필드 누락 400 등) 위주
 ├─ library/web/ShelfControllerTest.java        # @WebMvcTest
 ├─ library/web/ScrapControllerTest.java        # @WebMvcTest
@@ -110,9 +113,9 @@ src/integrationTest/java/com/chc/dpgb
 ├─ IntegrationTestSupport.java            # @SpringBootTest + TestcontainersConfiguration import
 ├─ RepositoryIntegrationTestSupport.java  # @DataJpaTest + AutoConfigureTestDatabase(NONE) + @ImportAutoConfiguration(FlywayAutoConfiguration) + TestcontainersConfiguration import
 ├─ DpgbApplicationTests.java              # IntegrationTestSupport 상속 (smoke test)
-├─ library/LibraryBookRepositoryTest.java # RepositoryIntegrationTestSupport 상속 — 저장/조회, unique 제약(shelf_id 범위), FK
-├─ library/ShelfRepositoryTest.java       # RepositoryIntegrationTestSupport 상속 — 기본 책장 unique 제약, 목록 정렬
-└─ library/ScrapRepositoryTest.java       # RepositoryIntegrationTestSupport 상속 — 책별 목록 정렬, 책 삭제 시 cascade 삭제(TestEntityManager.clear()로 1차 캐시 우회)
+├─ library/infrastructure/LibraryBookRepositoryTest.java # RepositoryIntegrationTestSupport 상속 — 저장/조회, unique 제약(shelf_id 범위), FK
+├─ library/infrastructure/ShelfRepositoryTest.java       # RepositoryIntegrationTestSupport 상속 — 기본 책장 unique 제약, 목록 정렬
+└─ library/infrastructure/ScrapRepositoryTest.java       # RepositoryIntegrationTestSupport 상속 — 책별 목록 정렬, 책 삭제 시 cascade 삭제(TestEntityManager.clear()로 1차 캐시 우회)
 
 src/integrationTest/resources
 └─ testcontainers.properties  # testcontainers.reuse.enable=true
@@ -132,7 +135,7 @@ Book Service는 database-per-service 원칙에 따라 자신만의 PostgreSQL �
 
 ## 테스트 구조
 
-- `test`: 단위 테스트. DB 없음. `com.chc.dpgb.security` 패키지의 validator/`MemberIdResolver` 단위 테스트와 `SecurityConfigTest`/`GlobalExceptionHandlerTest`(`@WebMvcTest` + 테스트 전용 nested 컨트롤러), `com.chc.dpgb.library`의 `ShelfRankTest`/`LibraryBookTest`/`ScrapTest`(Domain unit, Spring 컨텍스트 없음)가 있다.
+- `test`: 단위 테스트. DB 없음. `com.chc.dpgb.security` 패키지의 validator/`MemberIdResolver` 단위 테스트와 `SecurityConfigTest`/`GlobalExceptionHandlerTest`(`@WebMvcTest` + 테스트 전용 nested 컨트롤러), `com.chc.dpgb.library.domain`의 `ShelfRankTest`/`LibraryBookTest`/`ScrapTest`(Domain unit, Spring 컨텍스트 없음)가 있다.
 - `integrationTest`: PostgreSQL Testcontainers 기반 통합 테스트. Gradle에 구성 완료 — `./gradlew integrationTest`로 단독 실행, `./gradlew check`가 `test`와 함께 실행. Docker(Docker Desktop 등)가 로컬에 떠 있어야 한다.
 - `RepositoryIntegrationTestSupport`(`@DataJpaTest`)가 CLIAR-31에서 처음 만들어졌다. `@DataJpaTest`의 큐레이션된 autoconfiguration 목록은 Flyway를 포함하지 않으므로 `@ImportAutoConfiguration(FlywayAutoConfiguration.class)`를 명시적으로 추가해야 `ddl-auto: validate`가 마이그레이션된 실제 스키마를 검증한다(`.harness/DECISIONS.md` 참조). 새 `*RepositoryImpl`을 추가할 때 이 기반 클래스를 상속한다. DB 레벨 `ON DELETE CASCADE` 같은 부수효과를 검증할 때는 Hibernate 1차 캐시가 낡은 상태를 들고 있을 수 있어 `TestEntityManager`(`org.springframework.boot.jpa.test.autoconfigure`)의 `clear()`로 캐시를 비운 뒤 재조회해야 한다(`ScrapRepositoryTest`, CLIAR-45에서 확인).
 - 통합 테스트: `DpgbApplicationTests`(`IntegrationTestSupport` 상속, 빈 smoke test), `LibraryBookRepositoryTest`/`ShelfRepositoryTest`/`ScrapRepositoryTest`(`RepositoryIntegrationTestSupport` 상속).

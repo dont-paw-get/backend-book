@@ -2,7 +2,7 @@ package com.chc.dpgb.library.web.dto;
 
 import java.time.Instant;
 
-import com.chc.dpgb.library.Scrap;
+import com.chc.dpgb.library.domain.Scrap;
 
 public record ScrapSummary(Long scrapId, String sentence, Integer pageNumber, Instant createdAt) {
 

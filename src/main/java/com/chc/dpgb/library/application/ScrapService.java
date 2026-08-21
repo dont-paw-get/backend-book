@@ -1,4 +1,4 @@
-package com.chc.dpgb.library;
+package com.chc.dpgb.library.application;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -11,6 +11,8 @@ import com.chc.dpgb.common.exception.LibraryBookAccessDeniedException;
 import com.chc.dpgb.common.exception.LibraryBookNotFoundException;
 import com.chc.dpgb.common.exception.ScrapAccessDeniedException;
 import com.chc.dpgb.common.exception.ScrapNotFoundException;
+import com.chc.dpgb.library.domain.LibraryBook;
+import com.chc.dpgb.library.domain.Scrap;
 
 @Service
 public class ScrapService {
