@@ -1,5 +1,12 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-21: DB 정책 재반전 — MSA 원칙에 맞게 서비스별 PostgreSQL 분리로 되돌림
+
+- **기존 결정 재반전:** 2026-08-20에 "Java 기반 MSA 서비스 전체가 PostgreSQL 인스턴스·데이터베이스 하나를 공유하고 서로의 schema를 직접 JOIN할 수 있다"로 정책을 바꿨었다(당시도 사용자 명시적 지시). 이번에 사용자가 "MSA 의의에 맞게" 서비스마다 DB를 분리하는 쪽으로 다시 명시적으로 방향을 바꿨다 — database-per-service가 서비스 간 결합도를 낮추는 MSA 본래 취지에 더 부합한다는 판단.
+- **되돌린 내용:** Book Service는 다시 자신만의 PostgreSQL 인스턴스·데이터베이스만 소유한다. 다른 Java MSA 서비스든 Python RAG 서비스든 schema를 직접 JOIN할 수 없고, 모든 서비스 간 데이터 공유는 API 또는 event로만 한다(RAG는 애초에 이 정책 변경 전후 내내 별도 DB를 유지해 영향 없음).
+- **실제 코드/설정에는 영향이 없었다:** 확인해보니 `docker-compose.yml`(`POSTGRES_DB: dpgb`), `application-local.yaml`(`jdbc:postgresql://localhost:5432/dpgb`), `application-prod.yaml`(`DB_URL`/`DB_USERNAME`/`DB_PASSWORD` env var)은 애초부터 이 저장소 전용 DB(`dpgb`)만 가리키고 있었다 — 공유 DB 정책은 "다른 서비스의 schema를 같은 인스턴스에서 직접 JOIN할 수 있다"는 향후 가능성만 문서화했을 뿐, 실제로 공유할 다른 서비스의 schema/테이블 이름이 정해진 적도, JOIN 쿼리가 작성된 적도 없었다(2026-08-20 결정문 자체가 이를 "아직 하지 않은 것"으로 명시). 그래서 이번 되돌림은 문서(정책 서술)만 수정하면 되고 코드/마이그레이션/설정 변경은 없다.
+- **영향받은 문서:** `AGENTS.md`/`CLAUDE.md`(하네스: DB 정책 — 공유 서술 제거, database-per-service로 재기술), `.harness/ARCHITECTURE.md`(서비스 경계), `.harness/BACKLOG.md`(공유 DB 전제의 백로그 항목 — 스키마/계정 분리, DB 이름 재검토 — 제거, 더 이상 해당 없음).
+
 ## 2026-08-21: Scrap CRUD API 구현 — 책 삭제 시 스크랩 cascade 삭제, 실제 구현 티켓은 CLIAR-45 (CLIAR-45)
 
 - **티켓 번호 정정:** `.harness/PLAN.md`는 계약 설계 당시 티켓(CLIAR-43, API 계약 재정의)을 그대로 라벨로 남겨뒀었다. 실제 구현은 별도 티켓 `CLIAR-45-Scrap-CRUD-API` 브랜치에서 진행됐다 — Shelf가 "계약 설계(CLIAR-47) → 구현(CLIAR-32)"로 티켓이 나뉘었던 것과 같은 패턴.

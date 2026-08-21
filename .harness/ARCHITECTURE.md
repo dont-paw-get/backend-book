@@ -128,7 +128,7 @@ docker-compose.yml  # 로컬 개발용 PostgreSQL (POSTGRES_DB/USER/PASSWORD=dpg
 
 이 저장소는 Book Service(Java, 이 프로젝트)이며, 독립된 Python RAG Service와 별도로 개발된다.
 
-Book Service는 다른 Java 기반 MSA 서비스들과 PostgreSQL 인스턴스·데이터베이스 하나를 공유한다(CLIAR-43, `.harness/DECISIONS.md` 참조). 각 서비스는 자신의 schema는 자신의 Flyway migration으로만 관리하지만, 다른 서비스의 schema를 직접 JOIN해서 조회할 수 있다 — 이 저장소 안에서는 아직 다른 서비스의 schema/테이블 이름이 정해지지 않았고, 실제 JOIN 쿼리도 없다. Python RAG Service는 이 공유 DB에 포함되지 않고 자체 PostgreSQL + pgvector를 계속 별도로 소유하며, 데이터 공유는 API 또는 event로만 한다.
+Book Service는 database-per-service 원칙에 따라 자신만의 PostgreSQL 인스턴스·데이터베이스를 소유한다(`.harness/DECISIONS.md` 참조 — 2026-08-20에 한 차례 "Java 서비스 전체가 하나의 DB를 공유"로 바뀌었다가, MSA 원칙에 맞게 다시 서비스별 분리로 되돌렸다). 다른 Java MSA 서비스는 물론 Python RAG Service의 schema도 직접 JOIN할 수 없고, 모든 서비스 간 데이터 공유는 API 또는 event로만 한다. Python RAG Service는 지금처럼 자체 PostgreSQL + pgvector를 별도로 소유한다.
 
 ## 테스트 구조
 
