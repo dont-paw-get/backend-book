@@ -117,3 +117,17 @@ CLIAR-29가 커밋·PR·`develop` 병합까지 완료된 상태로 이미 `CLIAR
 커밋 여부는 아직 사용자에게 확인받지 않았다.
 
 다음 세션 시작 시: 이번 LibraryBook 도메인/영속성 구현(포트/어댑터 분리, Adapter 리네이밍, Lombok 적용, updateLibraryBook 전체 필드화(ADR-0006), 제목·저자 중복판정 제거(ADR-0007) 포함)이 커밋됐는지 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. 그다음 `.harness/PLAN.md`의 다음 섹션("Library CRUD API")을 계획할지 사용자에게 확인한다 — 그 티켓에서 `UpdateLibraryBookRequest` 등 Java DTO와 Bean Validation을 실제로 만든다.
+
+## 2026-08-21: 책장(Shelf) 관리 API 계약 설계 (ADR-0008)
+
+사용자가 책장 관리 기능표(책장 생성/책장에 책 넣기(default 책장 존재)/책장 수정(이름)/책장 삭제(내부 책은 default로 이동)/책장별 책 목록 조회/책장 목록 조회)를 제시하며 `openapi.yaml`과 관련 산출물 수정을 요청했다. 이 저장소 워크플로우(기능 변경은 구현 전 `.harness/PLAN.md` 초안 → 사용자 확인)에 따라, 계약을 바로 고치는 대신 먼저 `PLAN.md`에 설계 제안을 적었다.
+
+가장 큰 설계 쟁점은 `shelfRank`(ADR-0004, CLIAR-31에서 이미 entity·영속성·DB unique 제약까지 구현됨)의 유일성 범위였다 — 지금은 `memberId` 전역인데, 책장이 여러 개가 되면 "책장별 책 목록 조회"가 그 책장 안의 순서를 보여줘야 자연스러워 `shelfId`별로 좁히는 걸 제안했다. `AskUserQuestion`으로 3가지를 확인받았고 전부 권장안대로 확정됐다: (1) `shelfRank` 범위를 책장별로 축소, (2) 기본 책장은 계정 생성 이벤트 없이 필요 시점에 서버가 자동 생성(get-or-create) — 이 서비스가 회원가입 이벤트를 소유하지 않으므로, (3) 기본 책장은 삭제만 금지하고 이름 변경은 허용.
+
+구현: `docs/api/openapi.yaml`을 0.5.0→0.6.0으로 올리고 `Shelf` 태그, 신규 endpoint 5개(`POST/GET /api/v1/library/shelves`, `PATCH/DELETE /api/v1/library/shelves/{shelfId}`, `GET /api/v1/library/shelves/{shelfId}/books`) + 책 이동 endpoint(`PATCH /api/v1/library/books/{bookId}/shelf`, `moveLibraryBookToShelf`)를 추가했다. 관련 스키마(`CreateShelfRequest/Response`, `ShelfSummary`, `ShelfListResponse`, `UpdateShelfRequest/Response`, `MoveLibraryBookToShelfRequest/Response`)와 오류 응답(`InvalidShelfTarget`, `LibraryBookMoveAccessDenied/NotFound`, `InvalidShelfData`, `ShelfAccessDenied`, `ShelfNotFound`, `DefaultShelfCannotBeDeleted`) 신설. 기존 `CreateLibraryBookRequest`에 선택적 `shelfId`(생략 시 기본 책장), `CreateLibraryBookResponse`/`LibraryBookSummary`/`LibraryBookDetailResponse`에 `shelfId` 노출, `getLibraryBooks`에 선택적 `shelfId` 필터(하위 호환을 위해 생략 시 전체 책장 합산 유지) 추가. `reorderLibraryBook`/`InvalidReorderTarget`의 설명을 "서재"에서 "책장"(범위) 기준으로 갱신. Python 스크립트(`$ref` 무결성·중복 `operationId`·미사용 schema/response/parameter 검사)로 계약을 검증했다(22개 operationId, 이슈 없음) — 스크립트는 세션 스크래치패드에만 있고 저장소에는 커밋하지 않았다.
+
+`.harness/DOMAIN.md`에 `Shelf` aggregate 절 신설, `LibraryBook`/`shelfRank` 절을 책장 범위로 갱신, 최상단 범위 서술에 "책장(Shelf) 관리" 추가. `docs/api/decisions/0008-shelf-management.md`(ADR-0008) 신설, `docs/api/README.md` ADR 목록 갱신. `.harness/STATE.md`에 이번 계약 설계를 완료 단계로 기록(코드 구현은 전혀 안 됐다는 점을 명시). `.harness/PLAN.md`는 "책장(Shelf) 관리 API" 섹션을 설계 제안 서술에서 구현 체크리스트로 정리했고, 기존 "Library CRUD API" 섹션(`createLibraryBook`/`getLibraryBooks`/`reorderLibraryBook` 항목)에 `shelfId`/`shelfRank` 책장 범위 재조정을 먼저 반영해야 한다는 주의 문구를 추가했다.
+
+**아직 하지 않은 것(중요):** `Shelf` entity/영속성 구현, 이미 구현된 `LibraryBook`(CLIAR-31)에 `shelf_id` 컬럼 추가와 `V2__create_library_book.sql`의 unique 제약을 `member_id+shelf_rank`→`shelf_id+shelf_rank`로 바꾸는 작업, `LibraryBookRepository`/`LibraryBookJpaRepository`/`LibraryBookRepositoryJpaAdapter`의 책장 범위 재조정, controller/service, 계약 테스트 — 전부 `.harness/PLAN.md`에 체크리스트로만 있다. 작업은 이미 존재하던 `CLIAR-47-책장-기능-기획-추가` 브랜치에서 진행했다(별도 브랜치 생성 불필요). 이번 세션 변경사항(openapi.yaml, DOMAIN.md, ADR-0008, README, STATE, PLAN)의 커밋 여부는 아직 사용자에게 확인받지 않았다.
+
+다음 세션 시작 시: 이 세션의 계약 변경(`CLIAR-47-책장-기능-기획-추가` 브랜치)이 커밋됐는지 확인하고, 안 됐다면 커밋 의사를 사용자에게 먼저 확인한다. 그다음 책장 기능 구현을 실제 구현 티켓으로 시작할지, 아니면 `.harness/PLAN.md`의 다른 섹션("Library CRUD API" 등)을 먼저 할지 사용자에게 확인한다.

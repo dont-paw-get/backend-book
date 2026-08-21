@@ -20,3 +20,4 @@
 - [`0005-remove-reading-status.md`](./decisions/0005-remove-reading-status.md): `ReadingStatus`(`NOT_STARTED`/`READING`/`COMPLETED`) 필드·필터 전면 제거 근거
 - [`0006-update-library-book-full-payload.md`](./decisions/0006-update-library-book-full-payload.md): `updateLibraryBook`을 부분 수정에서 `Scrap.updateScrap`과 동일한 전체 필드 포함(`null`=삭제) 방식으로 통일한 근거
 - [`0007-drop-title-author-duplicate-check.md`](./decisions/0007-drop-title-author-duplicate-check.md): ISBN 없는 도서의 제목·저자 기반 중복 판정 제거 근거(ISBN 유일성 판정만 남김)
+- [`0008-shelf-management.md`](./decisions/0008-shelf-management.md): 책장(Shelf) 관리 신규 도입, `shelfRank` 범위를 사용자 전역에서 책장별로 재조정한 근거

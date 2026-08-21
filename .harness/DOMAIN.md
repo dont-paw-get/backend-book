@@ -2,7 +2,7 @@
 
 이 문서는 지금 시점의 업무 규칙(aggregate가 소유하는 개념, 불변식, 상태 전이, 중복 판정)만 담는다. API wire 표현은 `docs/api/openapi.yaml`, 결정 이유는 `DECISIONS.md`, 구현 진행 상황은 `STATE.md`를 본다.
 
-이 저장소(Book Service)가 다루는 범위는 `docs/api/openapi.yaml`에 명세된 것과 동일하다: 알라딘 API 기반 외부 도서 검색, 개인 서재(LibraryBook) 관리, 독서 진도, 문장 스크랩(Scrap), 동물 사서(Librarian). 표지 이미지에서 텍스트를 추출하는 OCR과 AI 기반 도서·무드 분석, 오늘의 기분 추천은 다른 MSA 컴포넌트 담당이라 이 문서의 범위 밖이다.
+이 저장소(Book Service)가 다루는 범위는 `docs/api/openapi.yaml`에 명세된 것과 동일하다: 알라딘 API 기반 외부 도서 검색, 개인 서재(LibraryBook) 관리, 책장(Shelf) 관리, 독서 진도, 문장 스크랩(Scrap), 동물 사서(Librarian). 표지 이미지에서 텍스트를 추출하는 OCR과 AI 기반 도서·무드 분석, 오늘의 기분 추천은 다른 MSA 컴포넌트 담당이라 이 문서의 범위 밖이다.
 
 **CLIAR-43에서 스크랩(Scrap)을 범위에 포함하도록 재조정했다.** 기존에는 "문장 OCR·감상·비밀 메모는 범위 밖"으로 판단했었지만(ADR-0002), 사용자가 담당 범위를 재확인하면서 문장 저장·페이지 번호·감상 및 메모 CRUD가 이 API Server 담당임을 확정했다. 문장을 이미지에서 추출하는 OCR 자체와 스크랩 이미지 업로드(오브젝트 스토리지 필요)는 여전히 범위 밖이며, 이 서비스는 이미 텍스트로 확정된 문장만 받아 저장한다. 사유는 `docs/api/decisions/0003-scope-narrowing-and-new-resources.md` 참조.
 
@@ -22,7 +22,8 @@
 
 - 소유자 식별자 `memberId`(요청 body가 아니라 인증 principal에서 얻는다)
 - 서버 발급 식별자 `bookId`
-- 사용자 서재 내 순서 `shelfRank` (LexoRank 방식의 불투명한 문자열 순서 키, 등록 시점에 서버가 맨 뒤 순서로 부여하고 등록 응답에 포함한다)
+- 소속 책장 `shelfId`(Shelf aggregate 참조, 필수) — 등록 시 생략하면 사용자의 기본 책장에 배치
+- 책장 내 순서 `shelfRank` (LexoRank 방식의 불투명한 문자열 순서 키, 등록 시점에 서버가 그 책장의 맨 뒤 순서로 부여하고 등록 응답에 포함한다)
 - 확인된 책 메타데이터: `title`, `author`, `isbn`, `publisher`, `publishedDate`, `coverUrl`
 - `totalPages`, `currentPage`
 - 생성·수정 시각
@@ -35,15 +36,36 @@
 
 `updateLibraryBook`은 부분 수정이 아니라 `title`/`author`/`isbn`/`publisher`/`publishedDate`/`coverUrl`/`totalPages` 7개 필드를 **항상 모두 포함**해야 하는 계약이다(`Scrap.updateScrap`과 동일한 방식). `isbn`/`publisher`/`publishedDate`/`coverUrl`는 nullable 필드라 `null`을 보내면 그 값을 삭제하고, 값을 보내면 교체한다. `title`/`author`/`totalPages`는 aggregate의 필수 불변값이라 `null`을 허용하지 않는다.
 
-### `shelfRank` (서재 내 순서, ADR-0004)
+### `shelfRank` (책장 내 순서, ADR-0004, ADR-0008로 범위 재조정)
 
-- `shelfRank`는 LexoRank 방식의 불투명한 문자열 순서 키다. 오름차순 문자열(사전식) 비교가 곧 서재 진열 순서이며, 값 자체는 사용자·클라이언트에게 아무 의미를 갖지 않는다.
-- 사용자별(`memberId`)로 유일해야 한다 — 동시 등록·재정렬에도 중복이 생기지 않도록 DB unique 제약(`memberId`, `shelfRank`)을 함께 사용한다.
-- 등록(`createLibraryBook`) 시점에 서버가 그 사용자 서재의 현재 마지막 `shelfRank`보다 뒤에 오는 값을 자동 부여한다(맨 뒤에 추가). 서재가 비어 있으면 기본 시작 값을 부여한다.
+- `shelfRank`는 LexoRank 방식의 불투명한 문자열 순서 키다. 오름차순 문자열(사전식) 비교가 곧 그 책장 안에서의 진열 순서이며, 값 자체는 사용자·클라이언트에게 아무 의미를 갖지 않는다.
+- **범위는 책장별(`shelfId`)로 유일해야 한다**(ADR-0008로 사용자 전역에서 책장별로 좁혔다) — 동시 등록·재정렬에도 중복이 생기지 않도록 DB unique 제약(`shelfId`, `shelfRank`)을 함께 사용한다. 서로 다른 책장의 책은 `shelfRank` 값이 같아도 무방하다.
+- 등록(`createLibraryBook`) 시점에 서버가 그 책장의 현재 마지막 `shelfRank`보다 뒤에 오는 값을 자동 부여한다(맨 뒤에 추가). 책장이 비어 있으면 기본 시작 값을 부여한다.
 - 순서 변경은 오직 전용 API(`reorderLibraryBook`, `PATCH /api/v1/library/books/{bookId}/order`)로만 한다 — `updateLibraryBook`(PATCH 본문)으로는 `shelfRank`를 바꿀 수 없다. 클라이언트는 "이 책을 어떤 책의 앞/뒤로 옮겨줘"라고만 요청하고(`beforeBookId`/`afterBookId` 중 정확히 하나), 서버가 그 두 이웃 사이에 들어갈 새 `shelfRank`를 계산해 저장한다.
-- 재정렬 대상(`beforeBookId`/`afterBookId`)은 같은 사용자 서재에 속해야 하고, 옮기려는 책 자신을 지정할 수 없다 — 위반 시 400(`INVALID_REORDER_TARGET`).
-- 두 이웃 `shelfRank` 사이에 더 끼워넣을 문자열 여유가 없어지면(반복 삽입으로 키 공간이 소진된 극단적 경우) 서버가 해당 사용자 서재 전체의 `shelfRank`를 넓은 간격으로 재계산(rebalance)한다. 이 재계산은 클라이언트에 노출되는 API가 아니라 서버 내부 유지보수 동작이다.
-- `GET /api/v1/library/books`의 `sortBy=SHELF_ORDER`(기본값)는 `shelfRank` 오름차순(`sortOrder` 기본값 `ASC`)이 자연스러운 진열 순서다. `LibraryBookSummary`에도 `shelfRank`가 노출된다.
+- 재정렬 대상(`beforeBookId`/`afterBookId`)은 같은 책장에 속해야 하고, 옮기려는 책 자신을 지정할 수 없다 — 위반 시 400(`INVALID_REORDER_TARGET`). 다른 책장으로 옮기려면 `reorderLibraryBook`이 아니라 `moveLibraryBookToShelf`를 쓴다.
+- 두 이웃 `shelfRank` 사이에 더 끼워넣을 문자열 여유가 없어지면(반복 삽입으로 키 공간이 소진된 극단적 경우) 서버가 해당 책장 전체의 `shelfRank`를 넓은 간격으로 재계산(rebalance)한다. 이 재계산은 클라이언트에 노출되는 API가 아니라 서버 내부 유지보수 동작이다.
+- `GET /api/v1/library/books`(전체 책장 합산, `shelfId` 필터 선택)와 `GET /api/v1/library/shelves/{shelfId}/books`(특정 책장)의 `sortBy=SHELF_ORDER`(기본값)는 `shelfRank` 오름차순(`sortOrder` 기본값 `ASC`)이 자연스러운 진열 순서다. `LibraryBookSummary`에도 `shelfId`/`shelfRank`가 함께 노출된다.
+- 책장을 옮기면(`moveLibraryBookToShelf`) 대상 책장의 맨 뒤에 새 `shelfRank`가 부여된다 — 이전 책장에서의 순서는 유지되지 않는다.
+
+## Shelf aggregate (ADR-0008)
+
+소유하는 개념:
+
+- 소유자 식별자 `memberId`(요청 body가 아니라 인증 principal에서 얻는다)
+- 서버 발급 식별자 `shelfId`
+- `name`(사용자가 정한 책장 이름)
+- `isDefault`(그 사용자의 기본 책장 여부 — 서버 전용 플래그, 클라이언트가 지정·변경할 수 없다)
+- 생성·수정 시각
+
+불변식:
+
+- 사용자마다 기본 책장(`isDefault=true`)이 정확히 1개 존재한다. 이 서비스는 회원가입/계정 생성 이벤트를 소유하지 않으므로, 별도 초기화 훅 없이 그 사용자의 책장 관련 동작(서재 책 등록, 책장 목록 조회 등)이 처음 필요해지는 시점에 서버가 없으면 생성한다(get-or-create) — 항상 존재하는 것처럼 보이되 실제 생성은 지연된다.
+- 기본 책장은 삭제할 수 없다 — 시도하면 400(`DEFAULT_SHELF_CANNOT_BE_DELETED`).
+- 기본 책장의 이름은 다른 책장과 마찬가지로 자유롭게 바꿀 수 있다. "기본"이라는 성질은 `isDefault` 플래그로만 구분되고 이름과는 무관하다.
+- 책장 이름 중복은 서버가 막지 않는다 — 같은 사용자가 같은 이름의 책장을 여러 개 가질 수 있다(LibraryBook의 제목·저자 중복을 사용자 자율에 맡긴 ADR-0007과 같은 기조).
+- 책장을 삭제하면 그 안에 있던 모든 `LibraryBook`이 그 사용자의 기본 책장 맨 뒤로 이동한다(`shelfRank` 재계산 포함).
+- `LibraryBook`은 항상 정확히 하나의 책장에 속한다(`shelfId` 필수) — 등록 시 생략하면 기본 책장에 배치된다. 책장 간 이동은 `moveLibraryBookToShelf`로만 한다.
+- 모든 조회와 변경은 aggregate 소유자(`memberId`) 기준으로 수행한다 — 다른 사용자의 책장에 접근하면 403(`SHELF_ACCESS_DENIED`).
 
 ## Scrap aggregate
 
@@ -113,6 +135,13 @@
 
 - ISBN이 없는 책에 대한 "정규화된 제목+저자" 중복 판정을 완전히 제거했다 — 서로 다른 책이라도 제목·저자가 우연히 같을 수 있어, 그 판단을 서버가 강제하지 않고 사용자 자율에 맡긴다.
 - ISBN이 있는 책의 사용자별 유일성 판정만 남는다.
+
+## 결정된 사항 (ADR-0008 반영)
+
+- 책장(Shelf) aggregate를 신설했다 — 사용자는 여러 책장을 만들고 책을 책장 간에 옮길 수 있다.
+- `shelfRank`의 유일성 범위를 사용자 전역(`memberId`)에서 책장별(`shelfId`)로 좁혔다 — "책장별 책 목록 조회"가 그 책장 안에서의 진열 순서를 보여줘야 자연스럽기 때문. `reorderLibraryBook`은 같은 책장 내에서만 가능하고, 책장 간 이동은 별도 API(`moveLibraryBookToShelf`)로 분리했다.
+- 기본 책장은 계정 생성 이벤트 없이 필요 시점에 서버가 자동 생성(get-or-create)한다. 삭제는 금지하지만 이름 변경은 허용한다.
+- 책장 이름 중복은 서버가 강제하지 않는다.
 
 ## 미결정 도메인
 
