@@ -12,15 +12,16 @@ import com.chc.dpgb.discovery.web.dto.BookSearchResponse;
 @RequestMapping("/api/v1/books")
 public class BookDiscoveryController {
 
-	private final BookDiscoveryService bookDiscoveryService;
+    private final BookDiscoveryService bookDiscoveryService;
 
-	BookDiscoveryController(BookDiscoveryService bookDiscoveryService) {
-		this.bookDiscoveryService = bookDiscoveryService;
-	}
+    BookDiscoveryController(BookDiscoveryService bookDiscoveryService) {
+        this.bookDiscoveryService = bookDiscoveryService;
+    }
 
-	@GetMapping("/search")
-	public BookSearchResponse searchBookInfo(
-			@RequestParam(required = false) String title, @RequestParam(required = false) String author) {
-		return new BookSearchResponse(bookDiscoveryService.search(title, author));
-	}
+    @GetMapping("/search")
+    public BookSearchResponse searchBookInfo(
+            @RequestParam(required = false) String title, @RequestParam(required = false) String author
+    ) {
+        return new BookSearchResponse(bookDiscoveryService.search(title, author));
+    }
 }

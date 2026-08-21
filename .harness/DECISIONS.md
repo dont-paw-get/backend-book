@@ -1,5 +1,12 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-21: 자바 코드 스타일 확정 — 줄바꿈된 파라미터 목록도 연속 들여쓰기(8칸) 그대로 유지
+
+- **배경:** `docs/intellij-java-wooteco-style.xml`로 전체 자바 코드(`src` 하위 98개 파일)를 재포맷한 뒤, 생성자/메서드 파라미터가 120열을 넘겨 줄바꿈될 때 파라미터 줄이 8칸(연속 들여쓰기) 들여써지는 게 맞는지 문제 제기가 있었다. 사용자는 `ALPHABET` 예시처럼 "표현식이 길어 줄바꿈"하는 경우만 8칸이고, 파라미터를 한 줄에 하나씩 나열하는 "일반적인 경우"는 4칸(기본 블록 들여쓰기)이어야 하지 않냐고 물었다.
+- **확인된 사실:** IntelliJ Java 코드 스타일 모델은 `INDENT_SIZE`(블록)와 `CONTINUATION_INDENT_SIZE`(그 외 모든 줄바꿈) 두 값만 제공하고, "파라미터 목록 전용 들여쓰기"라는 별도 옵션이 없다. `METHOD_PARAMETERS_WRAP`/`CALL_PARAMETERS_WRAP` 등은 줄바꿈 여부만 결정할 뿐 칸수는 전부 `CONTINUATION_INDENT_SIZE`(현재 8)를 공유한다. 즉 표현식 줄바꿈과 파라미터 목록 줄바꿈을 이 xml만으로는 서로 다른 칸수로 분리할 수 없다 — 분리하려면 값 자체를 바꿔 다른 컨텍스트에도 영향을 주거나(Option B), 괄호 위치 정렬(가변 칸수, Option C)로 우회하거나, IntelliJ 포맷터 밖의 커스텀 도구를 새로 만들어야 한다. 참고로 Google Java Format(레퍼런스 구현)도 파라미터 목록에 예외를 두지 않고 동일한 2배 들여쓰기 원칙을 적용한다.
+- **결정:** Option A(현재 유지) 확정 — 표현식 줄바꿈과 파라미터 목록 줄바꿈 모두 `CONTINUATION_INDENT_SIZE=8`을 그대로 적용한다. 사용자가 대안들의 트레이드오프(Option B는 표현식 줄바꿈도 4칸이 되어 4.5.2 규칙과 충돌·문서 수정 필요, Option C는 메서드/생성자 이름 길이에 따라 정렬 칸수가 가변적이라 diff가 들쭉날쭉해짐)를 확인한 뒤 현재 상태 유지를 선택했다.
+- **영향:** 코드/문서 변경 없음 — 이미 적용된 `docs/intellij-java-wooteco-style.xml`/`docs/JAVA_STYLE_GUIDE.md`와 그 결과로 재포맷된 전체 자바 코드가 그대로 최종 상태다. `.harness/PLAN.md`의 논의 섹션 제거, `.harness/STATE.md`에 한 줄 반영.
+
 ## 2026-08-21: Book Discovery API — 스텁 대신 실제 알라딘 연동, 라이브 호출로 응답 형태 확정 (CLIAR-34)
 
 - **계획 변경:** `.harness/PLAN.md`는 원래 "자격 증명이 없으므로 어댑터 인터페이스 + 스텁 구현"을 계획했었다. 구현 도중 사용자가 실제 알라딘 TTBKey(`.env`의 `ALADIN_API_TTB_KEY`)를 확보했다고 알려와, 스텁을 만들지 않고 바로 실제 연동(`AladinBookDiscoveryClient`)을 구현했다.

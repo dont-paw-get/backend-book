@@ -41,126 +41,140 @@ import com.chc.dpgb.security.MemberIdResolver;
 @RequestMapping("/api/v1/library/books")
 public class LibraryBookController {
 
-	private final LibraryBookService libraryBookService;
+    private final LibraryBookService libraryBookService;
 
-	LibraryBookController(LibraryBookService libraryBookService) {
-		this.libraryBookService = libraryBookService;
-	}
+    LibraryBookController(LibraryBookService libraryBookService) {
+        this.libraryBookService = libraryBookService;
+    }
 
-	@PostMapping
-	@ResponseStatus(HttpStatus.CREATED)
-	public CreateLibraryBookResponse createLibraryBook(
-			@AuthenticationPrincipal Jwt jwt, @RequestBody CreateLibraryBookRequest request) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		LibraryBook book = libraryBookService.createLibraryBook(
-				memberId, request.shelfId(), request.title(), request.author(), request.isbn(),
-				request.publisher(), request.publishedDate(), request.coverUrl(), requireTotalPages(request.totalPages()));
-		return CreateLibraryBookResponse.from(book);
-	}
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public CreateLibraryBookResponse createLibraryBook(
+            @AuthenticationPrincipal Jwt jwt, @RequestBody CreateLibraryBookRequest request
+    ) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        LibraryBook book = libraryBookService.createLibraryBook(
+                memberId, request.shelfId(), request.title(), request.author(), request.isbn(),
+                request.publisher(), request.publishedDate(), request.coverUrl(),
+                requireTotalPages(request.totalPages())
+        );
+        return CreateLibraryBookResponse.from(book);
+    }
 
-	@GetMapping
-	public LibraryBookPageResponse getLibraryBooks(
-			@AuthenticationPrincipal Jwt jwt,
-			@RequestParam(required = false) Long shelfId,
-			@RequestParam(required = false) String author,
-			@RequestParam(required = false, defaultValue = "SHELF_ORDER") String sortBy,
-			@RequestParam(required = false, defaultValue = "ASC") String sortOrder,
-			@RequestParam(required = false, defaultValue = "0") int page,
-			@RequestParam(required = false, defaultValue = "20") int size) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		LibrarySortBy resolvedSortBy = parseSortBy(sortBy);
-		Sort.Direction direction = parseSortOrder(sortOrder);
-		validatePaging(page, size);
-		Page<LibraryBook> result = libraryBookService.getLibraryBooks(
-				memberId, shelfId, author, resolvedSortBy, direction, page, size);
-		return LibraryBookPageResponse.from(result);
-	}
+    @GetMapping
+    public LibraryBookPageResponse getLibraryBooks(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam(required = false) Long shelfId,
+            @RequestParam(required = false) String author,
+            @RequestParam(required = false, defaultValue = "SHELF_ORDER") String sortBy,
+            @RequestParam(required = false, defaultValue = "ASC") String sortOrder,
+            @RequestParam(required = false, defaultValue = "0") int page,
+            @RequestParam(required = false, defaultValue = "20") int size
+    ) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        LibrarySortBy resolvedSortBy = parseSortBy(sortBy);
+        Sort.Direction direction = parseSortOrder(sortOrder);
+        validatePaging(page, size);
+        Page<LibraryBook> result = libraryBookService.getLibraryBooks(
+                memberId, shelfId, author, resolvedSortBy, direction, page, size
+        );
+        return LibraryBookPageResponse.from(result);
+    }
 
-	@GetMapping("/{bookId}")
-	public LibraryBookDetailResponse getLibraryBook(@AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		return LibraryBookDetailResponse.from(libraryBookService.getLibraryBook(memberId, bookId));
-	}
+    @GetMapping("/{bookId}")
+    public LibraryBookDetailResponse getLibraryBook(
+            @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId
+    ) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        return LibraryBookDetailResponse.from(libraryBookService.getLibraryBook(memberId, bookId));
+    }
 
-	@PatchMapping("/{bookId}")
-	public UpdateLibraryBookResponse updateLibraryBook(
-			@AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
-			@RequestBody UpdateLibraryBookRequest request) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		LibraryBook book = libraryBookService.updateLibraryBook(
-				memberId, bookId, request.title(), request.author(), request.isbn(), request.publisher(),
-				request.publishedDate(), request.coverUrl(), requireTotalPages(request.totalPages()));
-		return UpdateLibraryBookResponse.from(book);
-	}
+    @PatchMapping("/{bookId}")
+    public UpdateLibraryBookResponse updateLibraryBook(
+            @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
+            @RequestBody UpdateLibraryBookRequest request
+    ) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        LibraryBook book = libraryBookService.updateLibraryBook(
+                memberId, bookId, request.title(), request.author(), request.isbn(), request.publisher(),
+                request.publishedDate(), request.coverUrl(), requireTotalPages(request.totalPages())
+        );
+        return UpdateLibraryBookResponse.from(book);
+    }
 
-	@DeleteMapping("/{bookId}")
-	@ResponseStatus(HttpStatus.NO_CONTENT)
-	public void deleteLibraryBook(@AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		libraryBookService.deleteLibraryBook(memberId, bookId);
-	}
+    @DeleteMapping("/{bookId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteLibraryBook(@AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        libraryBookService.deleteLibraryBook(memberId, bookId);
+    }
 
-	@PatchMapping("/{bookId}/order")
-	public ReorderLibraryBookResponse reorderLibraryBook(
-			@AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
-			@RequestBody ReorderLibraryBookRequest request) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		LibraryBook book = libraryBookService.reorderLibraryBook(
-				memberId, bookId, request.beforeBookId(), request.afterBookId());
-		return ReorderLibraryBookResponse.from(book);
-	}
+    @PatchMapping("/{bookId}/order")
+    public ReorderLibraryBookResponse reorderLibraryBook(
+            @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
+            @RequestBody ReorderLibraryBookRequest request
+    ) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        LibraryBook book = libraryBookService.reorderLibraryBook(
+                memberId, bookId, request.beforeBookId(), request.afterBookId()
+        );
+        return ReorderLibraryBookResponse.from(book);
+    }
 
-	@PatchMapping("/{bookId}/shelf")
-	public MoveLibraryBookToShelfResponse moveLibraryBookToShelf(
-			@AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
-			@RequestBody MoveLibraryBookToShelfRequest request) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		if (request.shelfId() == null) {
-			throw new InvalidShelfTargetException();
-		}
-		LibraryBook book = libraryBookService.moveLibraryBookToShelf(memberId, bookId, request.shelfId());
-		return MoveLibraryBookToShelfResponse.from(book);
-	}
+    @PatchMapping("/{bookId}/shelf")
+    public MoveLibraryBookToShelfResponse moveLibraryBookToShelf(
+            @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
+            @RequestBody MoveLibraryBookToShelfRequest request
+    ) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        if (request.shelfId() == null) {
+            throw new InvalidShelfTargetException();
+        }
+        LibraryBook book = libraryBookService.moveLibraryBookToShelf(memberId, bookId, request.shelfId());
+        return MoveLibraryBookToShelfResponse.from(book);
+    }
 
-	@PatchMapping("/{bookId}/progress")
-	public UpdateReadingProgressResponse updateReadingProgress(
-			@AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
-			@RequestBody UpdateReadingProgressRequest request) {
-		String memberId = MemberIdResolver.resolve(jwt);
-		if (request.currentPage() == null || request.totalPages() == null) {
-			throw new InvalidPageValueException();
-		}
-		LibraryBook book = libraryBookService.updateReadingProgress(
-				memberId, bookId, request.currentPage(), request.totalPages());
-		return UpdateReadingProgressResponse.from(book);
-	}
+    @PatchMapping("/{bookId}/progress")
+    public UpdateReadingProgressResponse updateReadingProgress(
+            @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
+            @RequestBody UpdateReadingProgressRequest request
+    ) {
+        String memberId = MemberIdResolver.resolve(jwt);
+        if (request.currentPage() == null || request.totalPages() == null) {
+            throw new InvalidPageValueException();
+        }
+        LibraryBook book = libraryBookService.updateReadingProgress(
+                memberId, bookId, request.currentPage(), request.totalPages()
+        );
+        return UpdateReadingProgressResponse.from(book);
+    }
 
-	private static int requireTotalPages(Integer totalPages) {
-		if (totalPages == null) {
-			throw new InvalidBookDataException();
-		}
-		return totalPages;
-	}
+    private static int requireTotalPages(Integer totalPages) {
+        if (totalPages == null) {
+            throw new InvalidBookDataException();
+        }
+        return totalPages;
+    }
 
-	static LibrarySortBy parseSortBy(String value) {
-		try {
-			return LibrarySortBy.valueOf(value);
-		} catch (IllegalArgumentException e) {
-			throw new InvalidFilterParameterException();
-		}
-	}
+    static LibrarySortBy parseSortBy(String value) {
+        try {
+            return LibrarySortBy.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            throw new InvalidFilterParameterException();
+        }
+    }
 
-	static Sort.Direction parseSortOrder(String value) {
-		try {
-			return Sort.Direction.fromString(value);
-		} catch (IllegalArgumentException e) {
-			throw new InvalidFilterParameterException();
-		}
-	}
+    static Sort.Direction parseSortOrder(String value) {
+        try {
+            return Sort.Direction.fromString(value);
+        } catch (IllegalArgumentException e) {
+            throw new InvalidFilterParameterException();
+        }
+    }
 
-	static void validatePaging(int page, int size) {
-		if (page < 0 || size < 1 || size > 100) {
-			throw new InvalidFilterParameterException();
-		}
-	}
+    static void validatePaging(int page, int size) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new InvalidFilterParameterException();
+        }
+    }
 }

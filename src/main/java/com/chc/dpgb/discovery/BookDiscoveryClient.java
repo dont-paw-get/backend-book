@@ -4,5 +4,5 @@ import java.util.List;
 
 public interface BookDiscoveryClient {
 
-	List<ExternalBook> search(String title, String author);
+    List<ExternalBook> search(String title, String author);
 }

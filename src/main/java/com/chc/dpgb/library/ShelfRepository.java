@@ -5,13 +5,13 @@ import java.util.Optional;
 
 public interface ShelfRepository {
 
-	Shelf save(Shelf shelf);
+    Shelf save(Shelf shelf);
 
-	void delete(Shelf shelf);
+    void delete(Shelf shelf);
 
-	Optional<Shelf> findById(Long shelfId);
+    Optional<Shelf> findById(Long shelfId);
 
-	Optional<Shelf> findDefaultShelf(String memberId);
+    Optional<Shelf> findDefaultShelf(String memberId);
 
-	List<Shelf> findAllOwned(String memberId);
+    List<Shelf> findAllOwned(String memberId);
 }

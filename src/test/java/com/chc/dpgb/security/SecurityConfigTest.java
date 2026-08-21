@@ -23,34 +23,34 @@ import org.springframework.web.bind.annotation.RestController;
 @Import({SecurityConfig.class, SecurityConfigTest.PingController.class})
 class SecurityConfigTest {
 
-	@Autowired
-	private MockMvc mockMvc;
+    @Autowired
+    private MockMvc mockMvc;
 
-	@MockitoBean
-	private JwtDecoder jwtDecoder;
+    @MockitoBean
+    private JwtDecoder jwtDecoder;
 
-	@Test
-	void 토큰_없이_요청하면_401과_통일된_에러_포맷을_반환한다() throws Exception {
-		mockMvc.perform(get("/security-config-test/ping"))
-				.andExpect(status().isUnauthorized())
-				.andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
-				.andExpect(jsonPath("$.message").value("인증이 필요합니다."));
-	}
+    @Test
+    void 토큰_없이_요청하면_401과_통일된_에러_포맷을_반환한다() throws Exception {
+        mockMvc.perform(get("/security-config-test/ping"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+                .andExpect(jsonPath("$.message").value("인증이 필요합니다."));
+    }
 
-	@Test
-	void 유효한_토큰이면_sub_클레임에서_memberId를_추출한다() throws Exception {
-		mockMvc.perform(get("/security-config-test/ping")
-						.with(jwt().jwt(builder -> builder.subject("member-123"))))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.memberId").value("member-123"));
-	}
+    @Test
+    void 유효한_토큰이면_sub_클레임에서_memberId를_추출한다() throws Exception {
+        mockMvc.perform(get("/security-config-test/ping")
+                        .with(jwt().jwt(builder -> builder.subject("member-123"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.memberId").value("member-123"));
+    }
 
-	@RestController
-	static class PingController {
+    @RestController
+    static class PingController {
 
-		@GetMapping("/security-config-test/ping")
-		public Map<String, String> ping(@AuthenticationPrincipal Jwt jwt) {
-			return Map.of("memberId", MemberIdResolver.resolve(jwt));
-		}
-	}
+        @GetMapping("/security-config-test/ping")
+        public Map<String, String> ping(@AuthenticationPrincipal Jwt jwt) {
+            return Map.of("memberId", MemberIdResolver.resolve(jwt));
+        }
+    }
 }
