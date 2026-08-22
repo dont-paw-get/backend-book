@@ -1,7 +1,10 @@
 // Book Service ERD
-// src/main/resources/db/migration의 V1~V5(Flyway) 적용 후 최종 스키마를 그대로 옮긴 것이다.
+// src/main/resources/db/migration의 V1~V6(Flyway) 적용 후 최종 스키마를 그대로 옮긴 것이다.
 // 마이그레이션이 추가/변경되면 이 파일도 함께 갱신해야 한다(자동 동기화 없음).
 // dbdiagram.io 등 DBML 렌더러에 붙여넣으면 다이어그램으로 볼 수 있다.
+//
+// member_librarian_selection(대표 사서 선택)은 ADR-0009로 Member 서비스에 이관되어
+// V6 마이그레이션으로 제거됐다 — 이 파일에도 더 이상 없다. librarian(마스터 카탈로그)만 남는다.
 
 Table shelf {
   shelf_id bigint [pk, increment]
@@ -61,22 +64,14 @@ Table scrap {
 Table librarian {
   librarian_id bigint [pk, note: '자동 증가 아님 — Flyway seed에서 명시적으로 값 부여']
   name varchar(50) [not null]
-  type varchar(30) [not null, note: 'CAT | BIRD']
+  type librarian_type [not null]
   image_url varchar(500) [not null]
   evolution_stage integer [not null]
 
-  Note: '동물 사서 마스터 데이터. 앱이 생성/수정하지 않고 Flyway 마이그레이션이 직접 INSERT한다.'
+  Note: '동물 사서 마스터 데이터. 앱이 생성/수정하지 않고 Flyway 마이그레이션이 직접 INSERT한다. 회원별 대표 사서 선택은 Member 서비스가 소유한다(ADR-0009).'
 }
 
-Table member_librarian_selection {
-  id bigint [pk, increment]
-  member_id varchar(255) [not null, note: '외부 Member/Auth 서비스 회원 식별자 — FK 없음']
-  librarian_id bigint [not null, ref: > librarian.librarian_id]
-  selected_at timestamptz [not null, default: `now()`, note: '최초 선택·재선택 모두 이 필드 하나로 표현(select()가 덮어씀)']
-
-  indexes {
-    (member_id) [unique, name: 'uk_member_librarian_selection_member_id', note: '회원당 대표 사서 1개']
-  }
-
-  Note: '회원이 선택한 대표 동물 사서. aggregate root.'
+Enum librarian_type {
+  CAT
+  BIRD
 }

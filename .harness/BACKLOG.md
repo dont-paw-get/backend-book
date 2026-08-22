@@ -6,3 +6,4 @@
 - 다른 백엔드 MSA 컴포넌트가 Book Service API를 사용자 토큰 없이 M2M으로 직접 호출할 일이 생기면, Cognito Client Credentials 플로우 기반 인증을 별도로 설계(현재 `client_id` 검증은 단일 웹앱 App Client만 가정)
 - 로컬 개발 시 `.env` 파일(`ALADIN_API_TTB_KEY` 등)을 앱이 자동으로 읽지 않는다 — 여러 비밀값이 늘어나 매번 셸/IDE에 수동 export하는 게 번거로워지면 dotenv 로딩 도입 여부 검토(CLIAR-34)
 - `AladinBookDiscoveryClient`는 최대 10건 검색 결과로 고정되어 있고 실제 Aladin 사용량 한도(초당/일일 호출 제한)에 대한 처리(재시도, 백오프, 캐싱)가 없다 — 실제 트래픽 확인 후 필요하면 재설계
+- 회원 탈퇴(Member 서비스에서 소프트 삭제) 시 Book Service 쪽 데이터(서재/책장/스크랩)를 어떻게 처리할지는 아직 손대지 않았다(ADR-0009 논의 중 확인) — Member 서비스에 탈퇴 이벤트/알림 인프라가 생기면 재검토(현재는 이벤트 브로커 자체가 이 시스템에 없음)

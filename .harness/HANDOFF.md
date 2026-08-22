@@ -201,3 +201,21 @@ CLIAR-35 커밋(`74bb92a`) 이후 같은 세션에서 "swagger API 작성해" �
 커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
 
 다음 세션 시작 시: 이번 Swagger 문서 뷰어 작업(build.gradle, SecurityConfig, static/docs/index.html, SecurityConfigTest)이 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. 이 작업은 Jira 티켓 없이 CLIAR-35 브랜치 위에서 진행됐다는 점을 커밋 메시지/PR 설명에 반영할 것.
+
+## 2026-08-22 (계속): 대표 사서 선택을 Member 서비스로 이관 (ADR-0009)
+
+사용자가 자신이 작업 중인 Member 서비스 쪽 ERD 초안(DBML)을 붙여넣고 리뷰를 요청했다 — `USER.representative_librarian_id` 컬럼과 Book Service가 이미 CLIAR-46에서 구현한 `member_librarian_selection` 테이블이 같은 사실(회원의 대표 사서)을 중복 저장하는 문제, `USER`/`SOCIAL_ACCOUNT`만 스크리밍 케이스인 네이밍 불일치, `USER`가 PostgreSQL 예약어인 점(이 프로젝트가 지금까지 "member/회원" 용어를 써온 것과도 불일치), status/provider/type이 자유 varchar+note로만 표현된 점, 소프트 삭제 전파 정책 미정 등을 지적했다.
+
+사용자가 "selectMyLibrarian 부분은 그럼 user측(Member 서비스)에 가있는게 맞겠네?"라고 되물어, `getMyLibrarian`도 같은 데이터를 다루므로 함께 옮겨야 한다는 점(선택 API만 없애면 조회 API가 참조할 데이터가 사라짐)을 짚어주고 동의했다. `getLibrarians`(사서 마스터 카탈로그)는 `selectMyLibrarian`의 `librarianId` 유효성 검사 참조 지점이라 범위 밖으로 남겼다 — 카탈로그를 Member 서비스가 어떻게 참조할지는 이 ADR 밖으로 미뤘다.
+
+`.harness/PLAN.md`에 제거 초안을 먼저 적어 제시했고, 이어서 사용자가 요청한 DBML 수정(테이블명 snake_case, `user`→`member`, enum 적용) 중 "소프트 삭제 정책"은 대화로 정하자고 명시적으로 요청해 `AskUserQuestion`으로 두 가지를 확인받았다: (1) 탈퇴 시 email/nickname 익명화(재가입 허용, 권장안), (2) 탈퇴 회원의 Book Service 데이터(서재/책장/스크랩)는 지금 손대지 않음(이벤트 인프라 없음, 권장안) — `BACKLOG.md`로 이연.
+
+구현: `docs/api/openapi.yaml`(v0.7.0)에서 `getMyLibrarian`/`selectMyLibrarian` endpoint, `MyLibrarianResponse`/`SelectLibrarianRequest` 스키마, `LibrarianNotSelected`/`LibrarianNotFound` 응답 제거(파이썬 스크립트로 `$ref` 무결성·미사용 스키마/응답·중복 operationId 재검증, 22→20개). `docs/api/decisions/0009-remove-representative-librarian-selection.md`(ADR-0009) 신설, `docs/api/README.md` 갱신. `com.chc.dpgb.librarian`에서 `MemberLibrarianSelection`(domain), `MemberLibrarianSelectionRepository`+JPA 어댑터(application/infrastructure), `LibrarianService.getMyLibrarian`/`selectMyLibrarian`, `LibrarianController`의 두 메서드, `MyLibrarianResponse`/`SelectLibrarianRequest`(dto), `LibrarianNotSelectedException`/`LibrarianNotFoundException`(다른 곳에서 미사용 확인 후)을 삭제하고 `LibrarianService`/`LibrarianController`를 `getLibrarians`만 남도록 재작성했다. `MemberLibrarianSelectionTest`(도메인)/`MemberLibrarianSelectionRepositoryTest`(통합) 삭제, `LibrarianServiceTest`/`LibrarianControllerTest`를 카탈로그 조회 + 401 케이스만 남도록 축소. `V6__drop_member_librarian_selection.sql` 신설로 테이블 DROP(`V5`는 이미 `develop`에 병합돼 직접 수정하지 않음, `librarian` 마스터·시드 데이터는 유지).
+
+`docs/db/erd.dbml`에서 `member_librarian_selection` 테이블 제거, `librarian.type`을 DBML `Enum`(`CAT`/`BIRD`)으로 바꿨다. `.harness/DOMAIN.md`("Librarian / 대표 사서" 절을 "Librarian / 동물 사서 카탈로그"로, 대표 사서 선택 규칙 전체를 "Member 서비스 소유, 범위 밖"으로 정리), `.harness/ARCHITECTURE.md`(librarian 패키지 구조·V6 마이그레이션·테스트 목록), `.harness/BACKLOG.md`(탈퇴 회원의 Book Service 데이터 처리 이연) 반영. `./gradlew compileJava compileTestJava compileIntegrationTestJava`, `./gradlew check`(Docker Desktop 기동, 실제 PostgreSQL — `V6` DROP TABLE 포함) 전체 통과 확인. `.harness/PLAN.md`에서 해당 섹션 제거, `.harness/STATE.md`에 단계 요약 반영.
+
+마지막으로, 사용자가 애초에 보내준 Member 서비스 DBML을 이번 세션에서 합의된 기준(snake_case, `user`→`member`, enum, `representative_librarian_id` 컬럼 제거·`member_librarian_selection`만 유지, 탈퇴 시 익명화 semantics, cross-service `ref` 미사용)으로 다시 작성해 마크다운으로 보여줬다 — Book Service 저장소에는 저장하지 않고 채팅 응답으로만 제공했다(다른 서비스의 스키마이므로 이 저장소가 소유할 문서가 아님).
+
+커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
+
+다음 세션 시작 시: 이번 ADR-0009 구현(Librarian 축소, V6 마이그레이션, openapi.yaml/erd.dbml/DOMAIN.md 갱신)이 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. Member 서비스 쪽 DBML(대화로 다시 작성해 보여준 버전)은 이 저장소에 없으니, 사용자가 그 서비스의 실제 저장소에 반영했는지는 이 세션이 알 수 없다.

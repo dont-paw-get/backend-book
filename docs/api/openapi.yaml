@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Virtual Shelf Book Service API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Virtual Shelf MSA의 Book Service 계약이다.
     알라딘 API 기반 외부 도서 검색, 개인 서재 관리, 독서 진도, 문장 스크랩, 동물 사서를 제공한다.
@@ -31,7 +31,7 @@ tags:
   - name: Scrap
     description: 서재 도서에 연결된 문장 스크랩 관리
   - name: Librarian
-    description: 동물 사서 마스터 정보와 대표 사서 선택
+    description: 동물 사서 마스터 정보 조회. 회원별 대표 사서 선택은 Member 서비스가 소유한다(ADR-0009).
 
 paths:
   /api/v1/books/search:
@@ -801,63 +801,6 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
-  /api/v1/members/me/librarian:
-    get:
-      tags: [Librarian]
-      operationId: getMyLibrarian
-      summary: 내 대표 사서 조회
-      description: 로그인 사용자가 선택한 대표 사서를 조회한다.
-      responses:
-        "200":
-          description: 대표 사서 조회 성공
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MyLibrarianResponse"
-              example:
-                librarianId: 1
-                name: 나비
-                type: CAT
-                imageUrl: https://example.com/librarians/cat-1.png
-                evolutionStage: 1
-                selectedAt: "2026-08-20T09:00:00+09:00"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/LibrarianNotSelected"
-
-    put:
-      tags: [Librarian]
-      operationId: selectMyLibrarian
-      summary: 대표 사서 선택/변경
-      description: 로그인 사용자가 제공되는 동물 사서 중 하나를 대표 사서로 선택하거나 다른 사서로 변경한다.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SelectLibrarianRequest"
-            example:
-              librarianId: 2
-      responses:
-        "200":
-          description: 대표 사서 선택/변경 성공
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MyLibrarianResponse"
-              example:
-                librarianId: 2
-                name: 부엉
-                type: BIRD
-                imageUrl: https://example.com/librarians/bird-1.png
-                evolutionStage: 1
-                selectedAt: "2026-08-20T10:30:00+09:00"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/LibrarianNotFound"
-
 components:
   securitySchemes:
     bearerAuth:
@@ -1534,40 +1477,6 @@ components:
           items:
             $ref: "#/components/schemas/LibrarianSummary"
 
-    MyLibrarianResponse:
-      type: object
-      additionalProperties: false
-      required: [librarianId, name, type, imageUrl, evolutionStage, selectedAt]
-      properties:
-        librarianId:
-          type: integer
-          format: int64
-          minimum: 1
-        name:
-          type: string
-        type:
-          $ref: "#/components/schemas/LibrarianType"
-        imageUrl:
-          type: string
-          format: uri
-        evolutionStage:
-          type: integer
-          format: int32
-          minimum: 1
-        selectedAt:
-          type: string
-          format: date-time
-
-    SelectLibrarianRequest:
-      type: object
-      additionalProperties: false
-      required: [librarianId]
-      properties:
-        librarianId:
-          type: integer
-          format: int64
-          minimum: 1
-
   responses:
     Unauthorized:
       description: 인증 필요
@@ -1858,23 +1767,3 @@ components:
           example:
             code: SCRAP_NOT_FOUND
             message: 스크랩을 찾을 수 없습니다.
-
-    LibrarianNotSelected:
-      description: 아직 대표 사서를 선택하지 않음
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
-          example:
-            code: LIBRARIAN_NOT_SELECTED
-            message: 아직 대표 사서를 선택하지 않았습니다.
-
-    LibrarianNotFound:
-      description: 선택하려는 사서가 마스터 정보에 없음
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ErrorResponse"
-          example:
-            code: LIBRARIAN_NOT_FOUND
-            message: 선택할 수 없는 사서입니다.
