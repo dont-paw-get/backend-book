@@ -73,6 +73,21 @@ src/main/java/com/chc/dpgb
 │  └─ web
 │     ├─ BookDiscoveryController.java    # GET /api/v1/books/search
 │     └─ dto/BookSearchResponse.java     # { books: ExternalBook[] }
+├─ librarian                             # library와 동일한 4계층(domain/application/infrastructure/web) 구조
+│  ├─ domain
+│  │  ├─ Librarian.java                  # JPA entity, 마스터 데이터 — Flyway 시드로만 채워지고 앱이 생성/수정하지 않음. 도메인 메서드 없이 @Getter만 + 테스트 픽스처용 public 전체-필드 생성자
+│  │  └─ MemberLibrarianSelection.java   # JPA entity, aggregate root — memberId(unique)/librarianId/selectedAt(@UpdateTimestamp), select(librarianId)로 덮어쓰기
+│  ├─ application
+│  │  ├─ LibrarianRepository.java        # 포트 — findAll/findById
+│  │  ├─ MemberLibrarianSelectionRepository.java  # 포트 — findByMemberId/save
+│  │  ├─ SelectedLibrarian.java          # record(Librarian, selectedAt) — 두 aggregate를 조합한 읽기 전용 결과, getMyLibrarian/selectMyLibrarian의 반환 타입
+│  │  └─ LibrarianService.java           # getLibrarians/getMyLibrarian(미선택 시 LibrarianNotSelectedException)/selectMyLibrarian(미존재 시 LibrarianNotFoundException, get-or-create 방식으로 덮어쓰기·동시 최초 선택 경합은 ShelfService.getOrCreateDefaultShelf와 동일 패턴)
+│  ├─ infrastructure
+│  │  ├─ LibrarianJpaRepository.java / LibrarianRepositoryJpaAdapter.java
+│  │  └─ MemberLibrarianSelectionJpaRepository.java / MemberLibrarianSelectionRepositoryJpaAdapter.java  # save()는 saveAndFlush로 위임(동시 경합을 호출 시점에 동기적으로 드러냄)
+│  └─ web
+│     ├─ LibrarianController.java        # GET /api/v1/librarians, GET/PUT /api/v1/members/me/librarian
+│     └─ dto                             # LibrarianListResponse/LibrarianSummary/MyLibrarianResponse/SelectLibrarianRequest — openapi 스키마 1:1
 └─ security
    ├─ SecurityConfig.java             # JwtDecoder/SecurityFilterChain/AuthenticationEntryPoint 빈
    ├─ JwtAuthenticationEntryPoint.java
@@ -89,7 +104,8 @@ src/main/resources
    ├─ V1__init.sql                     # baseline (빈 마이그레이션)
    ├─ V2__create_library_book.sql      # library_book 테이블 + unique 제약(member_id+isbn partial — isbn 없는 도서는 중복판정 안 함, ADR-0007)
    ├─ V3__add_shelf_and_rescope_library_book.sql  # shelf 테이블(+ 기본 책장 부분 unique 인덱스) 신설, library_book.shelf_id 추가(+ FK), shelfRank unique 제약을 member_id 전역→shelf_id 범위로 재조정(ADR-0008). V2는 develop에 이미 병합되어 직접 수정하지 않음
-   └─ V4__create_scrap.sql             # scrap 테이블 신설, book_id FK에 ON DELETE CASCADE(책 삭제 시 스크랩도 함께 삭제, CLIAR-45)
+   ├─ V4__create_scrap.sql             # scrap 테이블 신설, book_id FK에 ON DELETE CASCADE(책 삭제 시 스크랩도 함께 삭제, CLIAR-45)
+   └─ V5__create_librarian.sql          # librarian 테이블(마스터, PK만 — 앱이 아닌 이 마이그레이션이 직접 INSERT) + member_librarian_selection 테이블(member_id unique, librarian_id FK), 시드 데이터 2종(CLIAR-46)
 
 src/test/java/com/chc/dpgb
 ├─ common/exception/GlobalExceptionHandlerTest.java
@@ -106,6 +122,9 @@ src/test/java/com/chc/dpgb
 ├─ discovery/web/BookDiscoveryControllerTest.java  # @WebMvcTest
 ├─ discovery/aladin/AuthorNameNormalizerTest.java  # 순수 함수 단위 테스트
 ├─ discovery/aladin/AladinBookDiscoveryClientTest.java  # MockRestServiceServer + 실제로 캡처한 알라딘 응답 fixture(네트워크 미사용)
+├─ librarian/domain/MemberLibrarianSelectionTest.java   # 도메인 unit — select(librarianId) 덮어쓰기·null 거부
+├─ librarian/application/LibrarianServiceTest.java      # Mockito — 미선택 404/미존재 404/재선택 덮어쓰기/동시 최초 선택 경합
+├─ librarian/web/LibrarianControllerTest.java           # @WebMvcTest
 └─ security/...  # validator/MemberIdResolver 단위 테스트, SecurityConfigTest
 
 src/integrationTest/java/com/chc/dpgb
@@ -115,7 +134,9 @@ src/integrationTest/java/com/chc/dpgb
 ├─ DpgbApplicationTests.java              # IntegrationTestSupport 상속 (smoke test)
 ├─ library/infrastructure/LibraryBookRepositoryTest.java # RepositoryIntegrationTestSupport 상속 — 저장/조회, unique 제약(shelf_id 범위), FK
 ├─ library/infrastructure/ShelfRepositoryTest.java       # RepositoryIntegrationTestSupport 상속 — 기본 책장 unique 제약, 목록 정렬
-└─ library/infrastructure/ScrapRepositoryTest.java       # RepositoryIntegrationTestSupport 상속 — 책별 목록 정렬, 책 삭제 시 cascade 삭제(TestEntityManager.clear()로 1차 캐시 우회)
+├─ library/infrastructure/ScrapRepositoryTest.java       # RepositoryIntegrationTestSupport 상속 — 책별 목록 정렬, 책 삭제 시 cascade 삭제(TestEntityManager.clear()로 1차 캐시 우회)
+├─ librarian/infrastructure/LibrarianRepositoryTest.java # RepositoryIntegrationTestSupport 상속 — V5 시드 데이터 조회
+└─ librarian/infrastructure/MemberLibrarianSelectionRepositoryTest.java  # RepositoryIntegrationTestSupport 상속 — member_id unique 제약
 
 src/integrationTest/resources
 └─ testcontainers.properties  # testcontainers.reuse.enable=true
