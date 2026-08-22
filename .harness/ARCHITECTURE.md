@@ -12,6 +12,7 @@
 - DB: PostgreSQL (JDBC 드라이버 `org.postgresql:postgresql`, 스키마는 Flyway migration으로 관리, `spring.jpa.hibernate.ddl-auto: validate`)
 - Testcontainers(`org.testcontainers:junit-jupiter`, `org.testcontainers:postgresql`) — 버전은 `build.gradle` 주석 참조. `io.spring.dependency-management`가 Spring Boot BOM의 testcontainers-bom 중첩 import를 반영하지 못하고, Boot 4.1.0이 가리키는 testcontainers.version이 아직 Maven Central에 없어 실재하는 버전을 직접 고정했다. Boot 업그레이드 시 재검토.
 - Lombok (compile/annotation processor) — entity getter는 `@Getter`로 생성(예: `LibraryBook`), setter는 쓰지 않고 불변식이 있는 도메인 메서드로만 상태를 바꾼다
+- `org.webjars:swagger-ui`(5.25.3) — API 문서 뷰어. springdoc 같은 애노테이션 기반 스펙 생성기가 아니라 순수 정적 HTML/JS 자산만 제공 — `docs/api/openapi.yaml`이 계약의 유일한 소스라는 원칙을 지키기 위한 선택
 - 실제 버전은 `build.gradle`과 Gradle Wrapper가 최종 기준
 - **Spring Boot 4.1.0 패키지 이동 주의**: Jackson은 `com.fasterxml.jackson.databind`가 아니라 `tools.jackson.databind`(Jackson 3)를 쓴다. `@WebMvcTest`는 `org.springframework.boot.webmvc.test.autoconfigure`(`spring-boot-webmvc-test` 모듈)에 있다. 예전 Boot 버전 예제 코드의 import 경로를 그대로 쓰면 컴파일 에러가 난다.
 
@@ -100,6 +101,9 @@ src/main/resources
 ├─ application.yaml          # 공통 설정 (JPA, Flyway 활성화, OAuth2 Resource Server issuer-uri/app-client-id, book-service.aladin.ttb-key=${ALADIN_API_TTB_KEY})
 ├─ application-local.yaml    # 로컬 프로필 — docker-compose Postgres 기본값
 ├─ application-prod.yaml     # 운영 프로필 — 전부 env var, 기본값 없음
+├─ static
+│  └─ docs
+│     └─ index.html          # Swagger UI 진입 페이지 — webjar(swagger-ui) 자산을 로드해 /openapi.yaml을 렌더링. /openapi.yaml 자체는 여기 없고 build.gradle의 processResources가 docs/api/openapi.yaml을 빌드 시점에 static/openapi.yaml로 복사해 채운다(수동 사본 없음)
 └─ db/migration
    ├─ V1__init.sql                     # baseline (빈 마이그레이션)
    ├─ V2__create_library_book.sql      # library_book 테이블 + unique 제약(member_id+isbn partial — isbn 없는 도서는 중복판정 안 함, ADR-0007)
@@ -161,11 +165,16 @@ Book Service는 database-per-service 원칙에 따라 자신만의 PostgreSQL �
 - `RepositoryIntegrationTestSupport`(`@DataJpaTest`)가 CLIAR-31에서 처음 만들어졌다. `@DataJpaTest`의 큐레이션된 autoconfiguration 목록은 Flyway를 포함하지 않으므로 `@ImportAutoConfiguration(FlywayAutoConfiguration.class)`를 명시적으로 추가해야 `ddl-auto: validate`가 마이그레이션된 실제 스키마를 검증한다(`.harness/DECISIONS.md` 참조). 새 `*RepositoryImpl`을 추가할 때 이 기반 클래스를 상속한다. DB 레벨 `ON DELETE CASCADE` 같은 부수효과를 검증할 때는 Hibernate 1차 캐시가 낡은 상태를 들고 있을 수 있어 `TestEntityManager`(`org.springframework.boot.jpa.test.autoconfigure`)의 `clear()`로 캐시를 비운 뒤 재조회해야 한다(`ScrapRepositoryTest`, CLIAR-45에서 확인).
 - 통합 테스트: `DpgbApplicationTests`(`IntegrationTestSupport` 상속, 빈 smoke test), `LibraryBookRepositoryTest`/`ShelfRepositoryTest`/`ScrapRepositoryTest`(`RepositoryIntegrationTestSupport` 상속).
 
+## DB 문서
+
+- ERD(DBML): `docs/db/erd.dbml` — `db/migration`의 V1~V5 적용 후 최종 스키마 스냅샷. 마이그레이션 변경 시 수동으로 함께 갱신해야 한다(자동 동기화 없음). dbdiagram.io 등에 붙여넣으면 다이어그램으로 볼 수 있다.
+
 ## API 문서
 
 - wire 계약: `docs/api/openapi.yaml`
 - 사용 안내: `docs/api/README.md`
 - 계약 결정: `docs/api/decisions/`
+- 실행 중인 앱에서 브라우저로 열람: `/docs/index.html`(Swagger UI, 인증 불필요) — `docs/api/openapi.yaml`을 그대로 렌더링만 한다(별도 스펙 생성 없음)
 
 ## Git
 

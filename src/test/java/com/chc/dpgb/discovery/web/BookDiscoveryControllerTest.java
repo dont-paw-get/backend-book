@@ -66,4 +66,20 @@ class BookDiscoveryControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_SEARCH_PARAMETER"));
     }
+
+    @Test
+    void 알라딘_API가_오류를_반환하면_502() throws Exception {
+        when(bookDiscoveryService.search("어린 왕자", null))
+                .thenThrow(new com.chc.dpgb.common.exception.AladinApiException());
+
+        mockMvc.perform(get("/api/v1/books/search").param("title", "어린 왕자").with(jwt()))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.code").value("ALADIN_API_ERROR"));
+    }
+
+    @Test
+    void 인증되지_않으면_401을_반환한다() throws Exception {
+        mockMvc.perform(get("/api/v1/books/search").param("title", "어린 왕자"))
+                .andExpect(status().isUnauthorized());
+    }
 }

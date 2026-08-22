@@ -43,6 +43,9 @@ dependencies {
 	// RestClient.Builder 자동 구성(RestClientAutoConfiguration)이 spring-boot-starter-webmvc에
 	// 딸려오지 않는다 — Book Discovery(알라딘 API 연동)의 AladinBookDiscoveryClient가 사용
 	implementation 'org.springframework.boot:spring-boot-starter-restclient'
+	// Swagger UI 정적 자산(순수 HTML/JS, Spring 애노테이션 스캔 없음) — docs/api/openapi.yaml을
+	// 그대로 렌더링하는 뷰어로만 쓴다. API 계약 소스는 계속 openapi.yaml 하나로 유지(CLAUDE.md 단일 소유권)
+	implementation 'org.webjars:swagger-ui:5.25.3'
 	compileOnly 'org.projectlombok:lombok'
 	runtimeOnly 'org.postgresql:postgresql'
 	annotationProcessor 'org.projectlombok:lombok'
@@ -61,6 +64,15 @@ dependencies {
 	integrationTestCompileOnly 'org.projectlombok:lombok'
 	integrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	integrationTestAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+tasks.named('processResources') {
+	// docs/api/openapi.yaml(계약의 유일한 소스)을 빌드 시점에 static 리소스로 복사해
+	// 앱이 /openapi.yaml로 직접 서빙하게 한다 — 별도로 수동 복사한 사본을 두지 않는다.
+	from('docs/api') {
+		include 'openapi.yaml'
+		into 'static'
+	}
 }
 
 tasks.named('test') {

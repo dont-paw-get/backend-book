@@ -34,7 +34,9 @@ public class SecurityConfig {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
+                .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers("/docs/**", "/webjars/**", "/openapi.yaml").permitAll()
+                        .anyRequest().authenticated())
                 .exceptionHandling(
                         exceptionHandling -> exceptionHandling.authenticationEntryPoint(authenticationEntryPoint))
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder)));
