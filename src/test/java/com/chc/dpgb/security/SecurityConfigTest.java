@@ -38,6 +38,12 @@ class SecurityConfigTest {
     }
 
     @Test
+    void 문서_경로는_토큰_없이_접근_가능하다() throws Exception {
+        mockMvc.perform(get("/docs/index.html"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void 유효한_토큰이면_sub_클레임에서_memberId를_추출한다() throws Exception {
         mockMvc.perform(get("/security-config-test/ping")
                         .with(jwt().jwt(builder -> builder.subject("member-123"))))

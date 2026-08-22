@@ -185,3 +185,19 @@ CLIAR-29가 커밋·PR·`develop` 병합까지 완료된 상태로 이미 `CLIAR
 이번 세션은 통합 테스트(`integrationTest`/`check`)는 실행하지 않았다 — 이 티켓이 순수 MockMvc 단위 테스트 추가라 Docker/PostgreSQL Testcontainers가 필요 없었기 때문(레포 정책상 기본 검증은 `./gradlew test`만). 커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
 
 다음 세션 시작 시: 이번 CLIAR-35 구현(5개 컨트롤러 테스트 전수화, 총 46개 신규 테스트)이 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. `.harness/PLAN.md`가 현재 비어 있어(완료 항목 없음) 다음에 무엇을 할지는 전적으로 사용자에게 확인해야 한다 — `.harness/BACKLOG.md`(실제 Cognito 연동 재검증, testcontainers 버전 고정 재검토, dotenv 도입, Aladin 호출량 제한 대비, 공유 DB 스키마 구조 재검토 등)를 참고 후보로 제시할 수 있다.
+
+## 2026-08-22 (계속): Swagger(API 문서 뷰어) 도입
+
+CLIAR-35 커밋(`74bb92a`) 이후 같은 세션에서 "swagger API 작성해" 요청을 받았다. `.harness/PLAN.md`에 계획 초안을 먼저 적었다 — 이 저장소는 `docs/api/openapi.yaml`을 wire 계약의 유일한 소스로 못박아뒀는데(`CLAUDE.md` 단일 소유권 표), 흔한 "Swagger 붙이기" 방식인 `springdoc-openapi`는 컨트롤러 애노테이션에서 스펙을 코드로 자동 생성해 소스가 둘로 나뉘는 문제가 있었다. `AskUserQuestion`으로 확인한 결과 A안(정적 뷰어 — `docs/api/openapi.yaml`을 그대로 두고 `org.webjars:swagger-ui`로 렌더링만)로 확정됐다. springdoc B안은 최신 버전(2.8.6)이 이 저장소의 Spring Boot 4.1.0/Jackson 3 조합에서 검증되지 않았다는 점도 함께 확인했었다(Maven Central 조회 결과 기반). 문서 페이지의 인증 요구 여부도 별도로 확인받아 "문서 경로만 permitAll"로 확정했다.
+
+구현: `build.gradle`에 `org.webjars:swagger-ui:5.25.3` 추가 + `processResources`에 `docs/api/openapi.yaml`→`static/openapi.yaml` 복사를 연결(빌드 시 자동 동기화). `src/main/resources/static/docs/index.html`이 webjar 자산으로 Swagger UI를 띄우고 `/openapi.yaml`을 로드한다. `SecurityConfig`의 `authorizeHttpRequests`에 `/docs/**`/`/webjars/**`/`/openapi.yaml` `permitAll()`을 `anyRequest().authenticated()`보다 먼저 추가했다. `SecurityConfigTest`에 문서 경로가 토큰 없이 200을 반환하는 테스트를 추가.
+
+구현 중간에 브랜치 정책을 놓친 것을 스스로 발견했다 — `CLAUDE.md`는 "현재 브랜치가 진행 중인 작업과 다른 티켓이면 새 브랜치를 만든다"고 못박아뒀는데, CLIAR-35 브랜치에서 그대로 파일을 만들기 시작한 뒤에야 이를 인지했다. `AskUserQuestion`으로 확인한 결과 사용자가 "현재 CLIAR-35 브랜치에 그대로 진행"을 선택해 별도 브랜치 없이 계속했다(티켓 번호가 없는 작업이라 별도 티켓 브랜치를 만들 근거도 약했음).
+
+검증: `./gradlew compileJava compileTestJava`, `./gradlew test`(신규 `SecurityConfigTest` 케이스 포함) 통과. `docker compose up -d`로 로컬 PostgreSQL을 띄우고 `./gradlew bootRun --args='--spring.profiles.active=local'`로 실제 앱을 구동해 `curl`로 `/docs/index.html`/`/openapi.yaml`/`/webjars/swagger-ui/5.25.3/*` 전부 200, `/api/v1/librarians`(토큰 없음)는 여전히 401임을 직접 확인했다. 확인 후 프로세스와 `docker compose down`으로 정리했다.
+
+`.harness/PLAN.md`에서 "Swagger(API 문서 뷰어) 도입" 섹션 제거, `.harness/STATE.md`에 단계 요약 반영, `.harness/ARCHITECTURE.md`(기술 스택에 webjars 추가, 저장소 구조에 `static/docs/index.html` 추가, "API 문서" 절에 런타임 뷰어 경로 추가) 갱신.
+
+커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
+
+다음 세션 시작 시: 이번 Swagger 문서 뷰어 작업(build.gradle, SecurityConfig, static/docs/index.html, SecurityConfigTest)이 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. 이 작업은 Jira 티켓 없이 CLIAR-35 브랜치 위에서 진행됐다는 점을 커밋 메시지/PR 설명에 반영할 것.
