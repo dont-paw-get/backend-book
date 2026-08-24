@@ -1,0 +1,9 @@
+# 개발 환경에서 base ConfigMap 위에 덮어쓸 값
+# AUTH_ISSUER_URI / AUTH_APP_CLIENT_ID 는 dev Cognito User Pool(ap-northeast-2_y1mKz50El) 값
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-book-config
+data:
+  AUTH_ISSUER_URI: "https://cognito-idp.ap-northeast-2.amazonaws.com/ap-northeast-2_y1mKz50El"
+  AUTH_APP_CLIENT_ID: "245uq1begv38q4ij0a743lgmhb"

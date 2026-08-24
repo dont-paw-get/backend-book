@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-book
+  labels:
+    app.kubernetes.io/name: backend-book
+spec:
+  # replicas 는 overlay 에서 환경별로 지정 (dev=1, prod=2 — prod 는 현재 주석 상태)
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend-book
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: backend-book
+    spec:
+      # Flyway 마이그레이션은 별도 initContainer 없이 앱 기동 시 자동 실행된다
+      # (spring.flyway.enabled: true, application.yaml)
+      containers:
+        - name: backend-book
+          image: backend-book
+          # develop-latest 처럼 고정 태그를 재사용하므로, 노드에 캐시된
+          # 옛 이미지를 쓰지 않도록 항상 새로 pull 한다.
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: backend-book-config
+            - secretRef:
+                name: backend-book-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 768Mi
+          # Dockerfile 이 root 로 실행되고(USER 지정 없음) 별도 non-root 사용자를 두지 않아
+          # runAsNonRoot/readOnlyRootFilesystem 은 강제하지 않는다.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL

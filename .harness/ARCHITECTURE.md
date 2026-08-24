@@ -34,6 +34,8 @@ src/main/java/com/chc/dpgb
 │     ├─ BadGatewayException.java     # abstract, 502
 │     ├─ GlobalExceptionHandler.java  # @RestControllerAdvice — 5개 abstract 타입 + 500 fallback(INTERNAL_ERROR)을 ErrorResponse로 매핑
 │     └─ (stable error code별 concrete 예외 13종 — InvalidSearchParameterException 등, openapi.yaml의 components.responses.* 기준)
+├─ health
+│  └─ HealthController.java           # GET /health — 인증 불필요(SecurityConfig permitAll), k8s readiness/liveness probe 대상
 ├─ library                                # domain/application/infrastructure/web 4계층 서브패키지로 분리(기계적 리팩터링, 동작 변경 없음 — library 패키지가 40개 파일까지 커져 경계가 흐려지기 시작한 시점에 분리)
 │  ├─ domain                             # 순수 도메인 모델. Spring 비의존(JPA 애노테이션은 예외 — entity 자체이므로), 포트/서비스가 이 계층을 참조
 │  │  ├─ LibraryBook.java                # aggregate root(JPA entity) — register/updateMetadata/updateProgress/changeShelfRank/changeShelfId에 불변식 캡슐화
@@ -170,6 +172,20 @@ Book Service는 database-per-service 원칙에 따라 자신만의 PostgreSQL �
 - 사용 안내: `docs/api/README.md`
 - 계약 결정: `docs/api/decisions/`
 - 실행 중인 앱에서 브라우저로 열람: `/docs/index.html`(Swagger UI, 인증 불필요) — `docs/api/openapi.yaml`을 그대로 렌더링만 한다(별도 스펙 생성 없음)
+
+## 배포 (EKS)
+
+`backend-record`와 동일한 GitOps 패턴을 그대로 이식했다: GitHub Actions가 ECR에 이미지를 빌드/푸시하고 dev overlay의 이미지 태그를 갱신하는 커밋을 push하면, ArgoCD가 그 변경을 감지해 자동 동기화한다. 애플리케이션 코드가 클러스터를 직접 건드리지 않는다(push-to-deploy가 아니라 pull 기반).
+
+- ECR: `594532711953.dkr.ecr.ap-northeast-2.amazonaws.com/dpyb-dev/dpyb-book`, EKS 클러스터: `dpyb-dev`
+- `.github/workflows/build-push-ecr.yml`: `develop` push(또는 수동 `workflow_dispatch`) 시 `Dockerfile`로 이미지를 빌드해 SHA 태그 + `develop-latest` 태그로 ECR에 푸시하고, `k8s/overlays/dev/kustomization.yaml`의 `newTag`를 SHA로 갱신하는 커밋을 같은 브랜치에 push한다(`paths-ignore: k8s/**`로 이 커밋 자체가 워크플로우를 다시 트리거하는 무한루프를 막는다). `main` push → prod 트리거는 현재 주석 처리(prod 배포 자체가 아직 비활성).
+- `k8s/`: Kustomize 기반. `base/`(Deployment/Service/Ingress/ConfigMap 공통 정의, namespace/replicas/image태그는 두지 않음) + `overlays/dev/`(namespace `dpyb-book-dev`, replicas 1, image `newTag: develop-latest`를 CI가 커밋 SHA로 갱신, `configmap-patch.yaml`로 dev Cognito 값 주입) + `overlays/prod/`(전체 주석 처리 — dev 안정화 후 활성화 예정). `k8s/secret.example.yaml`은 실제 값 없는 구조 예시일 뿐이고, 실제 Secret(`backend-book-secret`: `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`/`ALADIN_API_TTB_KEY`)은 Git에 커밋하지 않고 `kubectl create secret` 또는 SealedSecrets/External Secrets로 클러스터에 직접 생성한다.
+- ConfigMap(`backend-book-config`)에는 민감하지 않은 값만 둔다: `SPRING_PROFILES_ACTIVE=prod`(local 프로필과 달리 배포 환경은 항상 env var 기반 datasource를 쓰는 `application-prod.yaml`을 활성화 — dev/prod 네임스페이스 구분은 Spring 프로필이 아니라 overlay의 namespace/replicas/설정값으로 한다), `AUTH_ISSUER_URI`/`AUTH_APP_CLIENT_ID`(Cognito, 비밀은 아니지만 환경별로 다른 User Pool을 쓸 수 있어 overlay의 `configmap-patch.yaml`에서 채움 — 현재 플레이스홀더 상태, 실제 dev Cognito 값이 정해지면 채워야 함).
+- Flyway 마이그레이션은 `spring.flyway.enabled: true`로 앱 기동 시 자동 실행되므로, `backend-record`(Python/Alembic)처럼 별도 `initContainer`로 마이그레이션을 분리하지 않는다.
+- readiness/liveness probe는 `GET /health`(`com.chc.dpgb.health.HealthController`, 인증 불필요)를 대상으로 한다. ALB Ingress의 `alb.ingress.kubernetes.io/healthcheck-path`도 동일 경로를 쓴다.
+- `argocd/application-dev.yaml`: `targetRevision: develop`, `path: k8s/overlays/dev`, `automated.prune+selfHeal` — dev는 완전 자동 배포. `argocd/application-prod.yaml`은 overlay와 마찬가지로 전체 주석 처리.
+- ALB IngressClass(`alb`)는 `backend-auth` 레포에서 클러스터 전역으로 이미 구성되어 있고 여러 서비스가 공유한다 — 이 저장소에서 별도로 만들지 않는다.
+- 배포용 `Dockerfile`은 root로 실행되고(별도 `USER` 없음) non-root 사용자를 두지 않는다 — `k8s/base/deployment.yaml`의 `securityContext`도 이에 맞춰 `runAsNonRoot`/`readOnlyRootFilesystem`을 강제하지 않는다(CI/CD 구축 시점에 사용자가 확인, Dockerfile 자체는 변경하지 않기로 결정).
 
 ## Git
 
