@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-book-config
+  labels:
+    app.kubernetes.io/name: backend-book
+# 민감하지 않은 설정값만 여기에 둡니다.
+# DB 접속정보, 알라딘 API 키 등 비밀값은 Secret 에 둡니다.
+# AUTH_ISSUER_URI/AUTH_APP_CLIENT_ID(Cognito)는 환경별로 다른 User Pool을 쓸 수 있어
+# overlay 의 configmap-patch.yaml 에서 채웁니다.
+data:
+  # local(H2 없는 로컬 Docker Postgres) 프로필과 달리, 배포 환경은 항상
+  # env var 기반 datasource(application-prod.yaml)를 쓴다 — dev/prod 네임스페이스
+  # 구분은 overlay(namespace/replicas/configmap 값)로 하고, Spring 프로필은 "prod" 하나로 통일한다.
+  SPRING_PROFILES_ACTIVE: "prod"

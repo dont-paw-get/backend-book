@@ -6,6 +6,7 @@
 - [`.harness/`](./.harness/): 크로스 툴(Claude Code/Codex/Kiro) 작업 연속성 — 인수인계, 진행 상황, 아키텍처, 계획, 결정, 백로그
 - [API 계약](docs/api/openapi.yaml): OpenAPI 3.1 wire 계약
 - [API 문서 안내](docs/api/README.md): API 문서 탐색 진입점
+- [`k8s/`](./k8s/), [`argocd/`](./argocd/), [`.github/workflows/build-push-ecr.yml`](./.github/workflows/build-push-ecr.yml): EKS 배포(GitOps) 구성 — 상세는 [`.harness/ARCHITECTURE.md`](./.harness/ARCHITECTURE.md)의 "배포 (EKS)" 절 참조
 
 ## 📝 커밋 메시지 컨벤션 (Commit Convention)
 우리 팀은 자동화 도구(Changelog 등)와의 호환성을 위해 **'타입(Type)'은 영어**를 유지하되, **'제목(Subject)'과 '본문(Body)'은 명확한 한국어**로 작성합니다.
