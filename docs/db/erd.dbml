@@ -1,77 +1,145 @@
 // Book Service ERD
-// src/main/resources/db/migration의 V1~V6(Flyway) 적용 후 최종 스키마를 그대로 옮긴 것이다.
-// 마이그레이션이 추가/변경되면 이 파일도 함께 갱신해야 한다(자동 동기화 없음).
+// 2026-08-25 확정된 DB 스키마 개편 방향(.harness/DECISIONS.md 참조)을 반영한 목표 스키마다.
+// 아직 Flyway 마이그레이션(V7~)으로 구현되지 않았다 — 실제 마이그레이션을 작성하면 이 파일과 다시 맞춰 확인한다.
 // dbdiagram.io 등 DBML 렌더러에 붙여넣으면 다이어그램으로 볼 수 있다.
 //
-// member_librarian_selection(대표 사서 선택)은 ADR-0009로 Member 서비스에 이관되어
-// V6 마이그레이션으로 제거됐다 — 이 파일에도 더 이상 없다. librarian(마스터 카탈로그)만 남는다.
+// 이번 개편의 핵심 변경: PK 컬럼명을 전 테이블 `id`로 통일, `member_id`를 UUID로 변경,
+// shelf/library_book/scrap/librarian 4개 aggregate에 soft delete(deleted_at) 도입,
+// library_book에 genre/reading_status 재도입(ADR-0003/ADR-0005 반전),
+// librarian을 마스터 카탈로그에서 회원이 실제로 보유하는 인스턴스(레벨·경험치·대표 여부)로 전환하고
+// 대표 사서 선택(is_representative)을 Book Service가 다시 소유(ADR-0009를 대체하는 결정,
+// ADR 문서 자체는 아직 갱신 전 — .harness/PLAN.md TODO 참조). 타입별 공통 이미지는 신규
+// librarian_type_info가, 레벨 정책은 신규 librarian_level이 담당한다. 기존 librarian의
+// evolution_stage 컬럼은 새 스키마에 없어 폐기됐다.
 
 Table shelf {
-  shelf_id bigint [pk, increment]
-  member_id varchar(255) [not null, note: '외부 Member/Auth 서비스의 회원 식별자(Cognito sub) — 이 서비스가 소유하지 않음, FK 없음']
-  name varchar(50) [not null]
+  id         bigint [pk, increment]
+  member_id  uuid [not null, note: '외부 Member 서비스의 회원 식별자(Cognito sub) — 이 서비스가 소유하지 않음, FK 없음']
+  name       varchar(50) [not null]
   is_default boolean [not null, default: false]
   created_at timestamptz [not null, default: `now()`]
   updated_at timestamptz [not null, default: `now()`]
+  deleted_at timestamptz [note: '논리적 삭제 시각. NULL이면 활성']
 
   indexes {
-    (member_id) [unique, name: 'uk_shelf_member_default', note: 'WHERE is_default = true — 회원당 기본 책장 1개']
+    (member_id) [name: 'ix_shelf_member_id']
+    (member_id) [unique, name: 'uk_shelf_member_default', note: 'WHERE is_default = true AND deleted_at IS NULL — 회원당 기본 책장 1개(활성 행 기준)']
   }
 
-  Note: '회원의 책장. is_default=true인 행은 회원가입 이벤트 없이 필요 시점에 서버가 get-or-create로 생성한다(ADR-0008). 삭제 불가.'
+  Note: '회원의 책장. is_default=true인 행은 회원가입 이벤트 없이 필요 시점에 서버가 get-or-create로 생성한다(ADR-0008). 논리적 삭제만 허용.'
 }
 
 Table library_book {
-  book_id bigint [pk, increment]
-  member_id varchar(255) [not null, note: '외부 Member/Auth 서비스 회원 식별자 — FK 없음']
-  shelf_id bigint [not null, ref: > shelf.shelf_id]
-  shelf_rank varchar(128) [not null, note: 'LexoRank 불투명 문자열, COLLATE "C". 같은 shelf_id 안에서 진열 순서를 표현']
-  title varchar(200) [not null]
-  author varchar(100) [not null]
-  isbn varchar(13)
-  publisher varchar(100)
+  id             bigint [pk, increment]
+  member_id      uuid [not null, note: '외부 Member 서비스 회원 식별자 — FK 없음']
+  shelf_id       bigint [not null, ref: > shelf.id]
+  shelf_rank     varchar(128) [not null, note: 'LexoRank 불투명 문자열, COLLATE "C". 같은 shelf_id 안에서 진열 순서를 표현']
+  title          varchar(200) [not null]
+  author         varchar(100) [not null]
+  isbn           varchar(13)
+  genre          genre_type [not null, default: 'NONE']
+  publisher      varchar(100)
   published_date date
-  cover_url varchar(2048)
-  total_pages integer [not null]
-  current_page integer [not null]
-  created_at timestamptz [not null, default: `now()`]
-  updated_at timestamptz [not null, default: `now()`]
+  cover_url      text
+  reading_status book_reading_status [not null, default: 'PLANNED']
+  total_pages    integer
+  current_page   integer [not null, default: 0]
+  created_at     timestamptz [not null, default: `now()`]
+  updated_at     timestamptz [not null, default: `now()`]
+  deleted_at     timestamptz [note: '논리적 삭제 시각. NULL이면 활성']
 
   indexes {
-    (shelf_id, shelf_rank) [unique, name: 'uk_library_book_shelf_rank']
-    (member_id, isbn) [unique, name: 'uk_library_book_member_isbn', note: 'WHERE isbn IS NOT NULL — ISBN 있는 도서만 회원별 중복 등록 금지(ADR-0007)']
+    (shelf_id, shelf_rank) [unique, name: 'uk_library_book_shelf_rank', note: 'WHERE deleted_at IS NULL']
+    (member_id, isbn) [unique, name: 'uk_library_book_member_isbn', note: 'WHERE isbn IS NOT NULL AND deleted_at IS NULL — ISBN 있는 도서만 회원별 중복 등록 금지(ADR-0007)']
   }
 
   Note: '회원이 서재에 등록한 책 한 권. aggregate root.'
 }
 
 Table scrap {
-  scrap_id bigint [pk, increment]
-  book_id bigint [not null, ref: > library_book.book_id, note: 'ON DELETE CASCADE — 책 삭제 시 스크랩도 함께 삭제']
-  sentence varchar(2000) [not null]
-  page_number integer
-  memo varchar(2000)
-  created_at timestamptz [not null, default: `now()`]
-  updated_at timestamptz [not null, default: `now()`]
+  id              bigint [pk, increment]
+  book_id         bigint [not null, ref: > library_book.id]
+  sentence        text [not null]
+  page_number     integer
+  scrap_image_url text [not null]
+  memo            text
+  created_at      timestamptz [not null, default: `now()`]
+  updated_at      timestamptz [not null, default: `now()`]
+  deleted_at      timestamptz [note: '논리적 삭제 시각. NULL이면 활성']
 
   indexes {
     (book_id) [name: 'ix_scrap_book_id']
   }
 
-  Note: '책에 딸린 문장 스크랩. 독립된 member_id 없이 library_book을 통해서만 소유권이 정해진다.'
+  Note: '책에 딸린 문장 스크랩. 독립된 member_id 없이 library_book을 통해서만 소유권이 정해진다. book_id FK에 하드 ON DELETE CASCADE 없음 — 책이 논리 삭제되면 애플리케이션이 스크랩도 명시적으로 논리 삭제한다.'
+}
+
+Table librarian_level {
+  level               integer [pk, note: '사서 레벨, 1 이상']
+  required_experience bigint [not null, unique, note: '해당 레벨에 도달하기 위해 필요한 최소 누적 경험치, 0 이상']
+  created_at          timestamptz [not null, default: `now()`]
+  updated_at          timestamptz [not null, default: `now()`]
+
+  Note: '사서 레벨별 필요 누적 경험치를 관리하는 정책 테이블. 앱이 생성/수정하지 않고 Flyway 시드로 채운다 — 현재는 level=1, required_experience=0 최소 시드만 존재.'
+}
+
+Table librarian_type_info {
+  type              librarian_type [pk]
+  image_url         text [not null]
+  clicked_image_url text [not null]
+  created_at        timestamptz [not null, default: `now()`]
+  updated_at        timestamptz [not null, default: `now()`]
+
+  Note: '사서 타입별 공통 정보(기본/클릭 시 이미지)를 관리하는 마스터 테이블. 앱이 생성/수정하지 않고 Flyway 시드로 채운다.'
 }
 
 Table librarian {
-  librarian_id bigint [pk, note: '자동 증가 아님 — Flyway seed에서 명시적으로 값 부여']
-  name varchar(50) [not null]
-  type librarian_type [not null]
-  image_url varchar(500) [not null]
-  evolution_stage integer [not null]
+  id                bigint [pk, increment]
+  member_id         uuid [not null, note: '외부 Member 서비스의 회원 식별자(Cognito sub) — FK 없음']
+  type              librarian_type [not null, ref: > librarian_type_info.type]
+  name              varchar(50) [not null, note: '회원이 사서를 획득/등록할 때 직접 짓는 이름 — 타입 마스터 이름을 복사하지 않는다']
+  level             integer [not null, default: 1, ref: > librarian_level.level]
+  experience        bigint [not null, default: 0]
+  is_representative boolean [not null, default: false]
+  created_at        timestamptz [not null, default: `now()`]
+  updated_at        timestamptz [not null, default: `now()`]
+  deleted_at        timestamptz [note: '논리적 삭제 시각. NULL이면 활성']
 
-  Note: '동물 사서 마스터 데이터. 앱이 생성/수정하지 않고 Flyway 마이그레이션이 직접 INSERT한다. 회원별 대표 사서 선택은 Member 서비스가 소유한다(ADR-0009).'
+  indexes {
+    (member_id) [name: 'ix_librarian_member_id', note: 'WHERE deleted_at IS NULL']
+    (member_id, type) [unique, name: 'uk_librarian_member_type', note: 'WHERE deleted_at IS NULL — 회원당 같은 타입 최대 1마리']
+    (member_id) [unique, name: 'uk_librarian_member_representative', note: 'WHERE is_representative = true AND deleted_at IS NULL — 회원당 대표 사서 최대 1마리']
+  }
+
+  Note: '회원이 보유한 동물 사서 인스턴스. 회원당 타입별 최대 1마리, 각 사서의 레벨·경험치를 관리한다. 대표 사서 선택(is_representative)을 Book Service가 소유한다(ADR-0009를 대체하는 결정).'
+}
+
+Enum genre_type {
+  NONE
+  SCIENCE_FICTION
+  FANTASY
+  ROMANCE
+  MYSTERY_THRILLER
+  LITERARY_FICTION
+  ESSAY
+  POETRY_DRAMA
+  HUMANITIES
+  HISTORY
+  BUSINESS_ECONOMICS
+  SELF_HELP
+  SCIENCE
+  ARTS
+  RELIGION
+  COMPUTER_IT
+}
+
+Enum book_reading_status {
+  PLANNED
+  READING
+  COMPLETED
 }
 
 Enum librarian_type {
-  CAT
-  BIRD
+  RUSSIAN_BLUE
+  SHOEBILL
 }

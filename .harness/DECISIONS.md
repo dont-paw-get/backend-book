@@ -1,5 +1,17 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-25: DB 스키마 대개편 방향 확정 — genre/reading_status 재도입, librarian 소유 모델 전면 개편(ADR-0009 대체), soft delete 전 aggregate 도입
+
+- **배경:** 사용자가 `shelf`/`library_book`/`scrap`/`librarian`(+신규 `librarian_level`/`librarian_type_info`)을 아우르는 확정 SQL을 제공했다. 스키마 자체(PK `id` 통일, `member_id` UUID화, 전 aggregate `deleted_at` soft delete, `genre`/`reading_status` 컬럼 재도입, `librarian`의 마스터→회원 소유 인스턴스 전환)는 이 SQL을 그대로 소스로 삼기로 확정했다.
+- **작업 범위 확정:** 이번 개편은 스키마/엔티티/CRUD까지만이다. 경험치 획득 트리거·레벨업 시점 부수효과 같은 게임 로직 설계는 범위 밖 — `level`/`experience` 컬럼은 갖되 그 값을 바꾸는 비즈니스 규칙은 이번에 만들지 않는다.
+- **ADR-0009 대체 확정:** `is_representative`가 Book Service의 `librarian` 테이블에 재도입되면서, 대표 사서 선택·조회를 Book Service가 다시 소유하는 것으로 확정했다. ADR-0009(대표 사서 선택을 Member 서비스로 이관, CLIAR-46 결정의 반전)를 이번 결정이 다시 반전시키는 것이므로, 구현 시 새 ADR 번호로 대체 기록하고 ADR-0009에도 "이 결정은 ADR-00xx로 반전됨" 각주를 남긴다(아직 코드/ADR 문서 반영 전 — 방향만 확정).
+- **`librarian.name` 확정:** 회원이 사서를 획득/등록할 때 직접 이름을 짓는다 — 서버가 타입 마스터(`librarian_type_info`) 이름을 복사해 채우지 않는다(애초에 `librarian_type_info`에는 이름 필드가 없음).
+- **`librarian_level` 시드 범위 확정:** 이번엔 `level=1, required_experience=0` 최소치만 시드하고, 나머지 레벨 정책 값은 미정 상태로 `.harness/BACKLOG.md`에 이연한다.
+- **`evolution_stage` 컬럼 폐기 확정:** 기존 `librarian`(마스터 카탈로그) 테이블에 있던 필드였지만, 신규 SQL(`librarian`도 `librarian_type_info`도)에는 없다 — 이 개념 자체를 제거하는 것으로 간주한다.
+- **기술적 이슈 발견:** 사용자가 제공한 SQL은 `librarian`을 `librarian_type_info`보다 먼저 `CREATE TABLE`하면서 그 테이블을 참조하는 FK(`type librarian_type NOT NULL REFERENCES librarian_type_info (type)`)를 걸고 있어 순서상 오류다 — 실제 Flyway 마이그레이션에서는 `librarian_type` enum → `librarian_type_info` → `librarian_level` → `librarian` 순으로 재배열해야 한다.
+- **아직 미확정(구현 착수 전 사용자 확인 필요):** API 엔드포인트 정확한 설계(제안만 있는 상태), 사서 개명(이름 변경) 허용 여부, Flyway 마이그레이션을 몇 개 파일로 나눌지, soft delete 부수효과 기본안(Shelf 삭제 시 책 이동 유지, LibraryBook 삭제 시 Scrap 벌크 soft delete) 확정 여부, 사서 삭제(방출) API 필요 여부 — `.harness/PLAN.md`에 우선순위 TODO로 정리했다.
+- **영향받은 문서:** `.harness/PLAN.md`(설계 논의 서술을 TODO 체크리스트로 재정리). 실제 구현은 아직 시작 전 — Flyway 마이그레이션, 엔티티/서비스/컨트롤러, `docs/api/openapi.yaml`, `docs/db/erd.dbml`, `.harness/DOMAIN.md`/`ARCHITECTURE.md`, 신규 ADR, `.harness/BACKLOG.md`는 위 미확정 항목이 정리된 뒤 착수한다.
+
 ## 2026-08-21: DB 정책 재반전 — MSA 원칙에 맞게 서비스별 PostgreSQL 분리로 되돌림
 
 - **기존 결정 재반전:** 2026-08-20에 "Java 기반 MSA 서비스 전체가 PostgreSQL 인스턴스·데이터베이스 하나를 공유하고 서로의 schema를 직접 JOIN할 수 있다"로 정책을 바꿨었다(당시도 사용자 명시적 지시). 이번에 사용자가 "MSA 의의에 맞게" 서비스마다 DB를 분리하는 쪽으로 다시 명시적으로 방향을 바꿨다 — database-per-service가 서비스 간 결합도를 낮추는 MSA 본래 취지에 더 부합한다는 판단.
