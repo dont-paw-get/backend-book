@@ -9,6 +9,7 @@ public record ScrapDetailResponse(
         Long bookId,
         String sentence,
         Integer pageNumber,
+        String scrapImageUrl,
         String memo,
         Instant createdAt,
         Instant updatedAt
@@ -16,8 +17,8 @@ public record ScrapDetailResponse(
 
     public static ScrapDetailResponse from(Scrap scrap) {
         return new ScrapDetailResponse(
-                scrap.getScrapId(), scrap.getBookId(), scrap.getSentence(), scrap.getPageNumber(), scrap.getMemo(),
-                scrap.getCreatedAt(), scrap.getUpdatedAt()
+                scrap.getScrapId(), scrap.getBookId(), scrap.getSentence(), scrap.getPageNumber(),
+                scrap.getScrapImageUrl(), scrap.getMemo(), scrap.getCreatedAt(), scrap.getUpdatedAt()
         );
     }
 }

@@ -45,10 +45,11 @@ class SecurityConfigTest {
 
     @Test
     void 유효한_토큰이면_sub_클레임에서_memberId를_추출한다() throws Exception {
+        String memberId = "123e4567-e89b-12d3-a456-426614174000";
         mockMvc.perform(get("/security-config-test/ping")
-                        .with(jwt().jwt(builder -> builder.subject("member-123"))))
+                        .with(jwt().jwt(builder -> builder.subject(memberId))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.memberId").value("member-123"));
+                .andExpect(jsonPath("$.memberId").value(memberId));
     }
 
     @RestController
@@ -56,7 +57,7 @@ class SecurityConfigTest {
 
         @GetMapping("/security-config-test/ping")
         public Map<String, String> ping(@AuthenticationPrincipal Jwt jwt) {
-            return Map.of("memberId", MemberIdResolver.resolve(jwt));
+            return Map.of("memberId", MemberIdResolver.resolve(jwt).toString());
         }
     }
 }

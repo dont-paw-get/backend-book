@@ -1,5 +1,7 @@
 package com.chc.dpgb.library.web;
 
+import java.util.UUID;
+
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -37,9 +39,9 @@ public class ScrapController {
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
             @RequestBody CreateScrapRequest request
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         Scrap scrap = scrapService.createScrap(memberId, bookId, request.sentence(), request.pageNumber(),
-                request.memo());
+                request.scrapImageUrl(), request.memo());
         return ScrapDetailResponse.from(scrap);
     }
 
@@ -49,7 +51,7 @@ public class ScrapController {
             @RequestParam(required = false, defaultValue = "0") int page,
             @RequestParam(required = false, defaultValue = "20") int size
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         LibraryBookController.validatePaging(page, size);
         Page<Scrap> result = scrapService.getScraps(memberId, bookId, page, size);
         return ScrapPageResponse.from(result);
@@ -57,7 +59,7 @@ public class ScrapController {
 
     @GetMapping("/api/v1/library/scraps/{scrapId}")
     public ScrapDetailResponse getScrap(@AuthenticationPrincipal Jwt jwt, @PathVariable Long scrapId) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         return ScrapDetailResponse.from(scrapService.getScrap(memberId, scrapId));
     }
 
@@ -66,16 +68,16 @@ public class ScrapController {
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long scrapId,
             @RequestBody UpdateScrapRequest request
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         Scrap scrap = scrapService.updateScrap(memberId, scrapId, request.sentence(), request.pageNumber(),
-                request.memo());
+                request.scrapImageUrl(), request.memo());
         return ScrapDetailResponse.from(scrap);
     }
 
     @DeleteMapping("/api/v1/library/scraps/{scrapId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteScrap(@AuthenticationPrincipal Jwt jwt, @PathVariable Long scrapId) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         scrapService.deleteScrap(memberId, scrapId);
     }
 }

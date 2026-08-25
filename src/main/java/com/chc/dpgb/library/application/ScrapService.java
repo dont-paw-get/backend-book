@@ -1,5 +1,8 @@
 package com.chc.dpgb.library.application;
 
+import java.time.Instant;
+import java.util.UUID;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -26,32 +29,36 @@ public class ScrapService {
     }
 
     @Transactional
-    public Scrap createScrap(String memberId, Long bookId, String sentence, Integer pageNumber, String memo) {
+    public Scrap createScrap(
+            UUID memberId, Long bookId, String sentence, Integer pageNumber, String scrapImageUrl, String memo
+    ) {
         getOwnedBook(memberId, bookId);
         try {
-            return scrapRepository.save(Scrap.create(bookId, sentence, pageNumber, memo));
+            return scrapRepository.save(Scrap.create(bookId, sentence, pageNumber, scrapImageUrl, memo));
         } catch (IllegalArgumentException e) {
             throw new InvalidScrapDataException(e.getMessage());
         }
     }
 
     @Transactional(readOnly = true)
-    public Page<Scrap> getScraps(String memberId, Long bookId, int page, int size) {
+    public Page<Scrap> getScraps(UUID memberId, Long bookId, int page, int size) {
         getOwnedBook(memberId, bookId);
         Pageable pageable = PageRequest.of(page, size);
         return scrapRepository.findPageByBookId(bookId, pageable);
     }
 
     @Transactional(readOnly = true)
-    public Scrap getScrap(String memberId, Long scrapId) {
+    public Scrap getScrap(UUID memberId, Long scrapId) {
         return getOwnedScrap(memberId, scrapId);
     }
 
     @Transactional
-    public Scrap updateScrap(String memberId, Long scrapId, String sentence, Integer pageNumber, String memo) {
+    public Scrap updateScrap(
+            UUID memberId, Long scrapId, String sentence, Integer pageNumber, String scrapImageUrl, String memo
+    ) {
         Scrap scrap = getOwnedScrap(memberId, scrapId);
         try {
-            scrap.update(sentence, pageNumber, memo);
+            scrap.update(sentence, pageNumber, scrapImageUrl, memo);
         } catch (IllegalArgumentException e) {
             throw new InvalidScrapDataException(e.getMessage());
         }
@@ -59,12 +66,21 @@ public class ScrapService {
     }
 
     @Transactional
-    public void deleteScrap(String memberId, Long scrapId) {
+    public void deleteScrap(UUID memberId, Long scrapId) {
         Scrap scrap = getOwnedScrap(memberId, scrapId);
-        scrapRepository.delete(scrap);
+        scrap.softDelete(Instant.now());
+        scrapRepository.save(scrap);
     }
 
-    private LibraryBook getOwnedBook(String memberId, Long bookId) {
+    @Transactional
+    void softDeleteAllByBookId(Long bookId, Instant deletedAt) {
+        for (Scrap scrap : scrapRepository.findAllByBookId(bookId)) {
+            scrap.softDelete(deletedAt);
+            scrapRepository.save(scrap);
+        }
+    }
+
+    private LibraryBook getOwnedBook(UUID memberId, Long bookId) {
         LibraryBook book = libraryBookRepository.findById(bookId)
                 .orElseThrow(LibraryBookNotFoundException::new);
         if (!book.getMemberId().equals(memberId)) {
@@ -73,7 +89,7 @@ public class ScrapService {
         return book;
     }
 
-    private Scrap getOwnedScrap(String memberId, Long scrapId) {
+    private Scrap getOwnedScrap(UUID memberId, Long scrapId) {
         Scrap scrap = scrapRepository.findById(scrapId).orElseThrow(ScrapNotFoundException::new);
         LibraryBook book = libraryBookRepository.findById(scrap.getBookId())
                 .orElseThrow(ScrapNotFoundException::new);

@@ -1,8 +1,10 @@
 package com.chc.dpgb.library.domain;
 
 import java.time.Instant;
+import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import jakarta.persistence.Column;
@@ -15,16 +17,17 @@ import lombok.Getter;
 
 @Entity
 @Table(name = "shelf")
+@SQLRestriction("deleted_at IS NULL")
 @Getter
 public class Shelf {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "shelf_id")
+    @Column(name = "id")
     private Long shelfId;
 
     @Column(name = "member_id", nullable = false)
-    private String memberId;
+    private UUID memberId;
 
     @Column(nullable = false)
     private String name;
@@ -40,16 +43,19 @@ public class Shelf {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
     protected Shelf() {
     }
 
-    private Shelf(String memberId, String name, boolean isDefault) {
+    private Shelf(UUID memberId, String name, boolean isDefault) {
         this.memberId = memberId;
         this.isDefault = isDefault;
         rename(name);
     }
 
-    public static Shelf create(String memberId, String name, boolean isDefault) {
+    public static Shelf create(UUID memberId, String name, boolean isDefault) {
         return new Shelf(memberId, name, isDefault);
     }
 
@@ -58,5 +64,13 @@ public class Shelf {
             throw new IllegalArgumentException("name은 비어 있을 수 없습니다.");
         }
         this.name = name;
+    }
+
+    public void softDelete(Instant deletedAt) {
+        this.deletedAt = deletedAt;
+    }
+
+    public boolean isDeleted() {
+        return deletedAt != null;
     }
 }

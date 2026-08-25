@@ -2,6 +2,7 @@ package com.chc.dpgb.library.infrastructure;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -25,11 +26,6 @@ class LibraryBookRepositoryJpaAdapter implements LibraryBookRepository {
     }
 
     @Override
-    public void delete(LibraryBook libraryBook) {
-        jpaRepository.delete(libraryBook);
-    }
-
-    @Override
     public Optional<LibraryBook> findById(Long bookId) {
         return jpaRepository.findById(bookId);
     }
@@ -45,7 +41,7 @@ class LibraryBookRepositoryJpaAdapter implements LibraryBookRepository {
     }
 
     @Override
-    public boolean existsByIsbn(String memberId, String isbn) {
+    public boolean existsByIsbn(UUID memberId, String isbn) {
         return jpaRepository.existsByMemberIdAndIsbn(memberId, isbn);
     }
 
@@ -56,14 +52,14 @@ class LibraryBookRepositoryJpaAdapter implements LibraryBookRepository {
 
     @Override
     public Page<LibraryBook> findPage(
-            String memberId, Long shelfId, String author, Pageable pageable
+            UUID memberId, Long shelfId, String author, Pageable pageable
     ) {
         return jpaRepository.findPage(memberId, shelfId, author, pageable);
     }
 
     @Override
     public Page<LibraryBook> findPageOrderByProgress(
-            String memberId, Long shelfId, String author, boolean ascending, Pageable pageable
+            UUID memberId, Long shelfId, String author, boolean ascending, Pageable pageable
     ) {
         return ascending
                 ? jpaRepository.findPageOrderByProgressAsc(memberId, shelfId, author, pageable)

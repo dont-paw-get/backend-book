@@ -1,5 +1,7 @@
 package com.chc.dpgb.library.web;
 
+import java.util.UUID;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -16,7 +18,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.chc.dpgb.common.exception.InvalidBookDataException;
 import com.chc.dpgb.common.exception.InvalidFilterParameterException;
 import com.chc.dpgb.common.exception.InvalidPageValueException;
 import com.chc.dpgb.common.exception.InvalidShelfTargetException;
@@ -52,11 +53,11 @@ public class LibraryBookController {
     public CreateLibraryBookResponse createLibraryBook(
             @AuthenticationPrincipal Jwt jwt, @RequestBody CreateLibraryBookRequest request
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         LibraryBook book = libraryBookService.createLibraryBook(
                 memberId, request.shelfId(), request.title(), request.author(), request.isbn(),
-                request.publisher(), request.publishedDate(), request.coverUrl(),
-                requireTotalPages(request.totalPages())
+                request.genre(), request.publisher(), request.publishedDate(), request.coverUrl(),
+                request.readingStatus(), request.totalPages()
         );
         return CreateLibraryBookResponse.from(book);
     }
@@ -71,7 +72,7 @@ public class LibraryBookController {
             @RequestParam(required = false, defaultValue = "0") int page,
             @RequestParam(required = false, defaultValue = "20") int size
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         LibrarySortBy resolvedSortBy = parseSortBy(sortBy);
         Sort.Direction direction = parseSortOrder(sortOrder);
         validatePaging(page, size);
@@ -85,7 +86,7 @@ public class LibraryBookController {
     public LibraryBookDetailResponse getLibraryBook(
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         return LibraryBookDetailResponse.from(libraryBookService.getLibraryBook(memberId, bookId));
     }
 
@@ -94,10 +95,11 @@ public class LibraryBookController {
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
             @RequestBody UpdateLibraryBookRequest request
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         LibraryBook book = libraryBookService.updateLibraryBook(
-                memberId, bookId, request.title(), request.author(), request.isbn(), request.publisher(),
-                request.publishedDate(), request.coverUrl(), requireTotalPages(request.totalPages())
+                memberId, bookId, request.title(), request.author(), request.isbn(), request.genre(),
+                request.publisher(), request.publishedDate(), request.coverUrl(), request.readingStatus(),
+                request.totalPages()
         );
         return UpdateLibraryBookResponse.from(book);
     }
@@ -105,7 +107,7 @@ public class LibraryBookController {
     @DeleteMapping("/{bookId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteLibraryBook(@AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         libraryBookService.deleteLibraryBook(memberId, bookId);
     }
 
@@ -114,7 +116,7 @@ public class LibraryBookController {
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
             @RequestBody ReorderLibraryBookRequest request
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         LibraryBook book = libraryBookService.reorderLibraryBook(
                 memberId, bookId, request.beforeBookId(), request.afterBookId()
         );
@@ -126,7 +128,7 @@ public class LibraryBookController {
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
             @RequestBody MoveLibraryBookToShelfRequest request
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         if (request.shelfId() == null) {
             throw new InvalidShelfTargetException();
         }
@@ -139,21 +141,14 @@ public class LibraryBookController {
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
             @RequestBody UpdateReadingProgressRequest request
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
-        if (request.currentPage() == null || request.totalPages() == null) {
+        UUID memberId = MemberIdResolver.resolve(jwt);
+        if (request.currentPage() == null) {
             throw new InvalidPageValueException();
         }
         LibraryBook book = libraryBookService.updateReadingProgress(
                 memberId, bookId, request.currentPage(), request.totalPages()
         );
         return UpdateReadingProgressResponse.from(book);
-    }
-
-    private static int requireTotalPages(Integer totalPages) {
-        if (totalPages == null) {
-            throw new InvalidBookDataException();
-        }
-        return totalPages;
     }
 
     static LibrarySortBy parseSortBy(String value) {

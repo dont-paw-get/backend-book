@@ -2,6 +2,7 @@ package com.chc.dpgb.library.infrastructure;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.stereotype.Repository;
 
@@ -23,22 +24,17 @@ class ShelfRepositoryJpaAdapter implements ShelfRepository {
     }
 
     @Override
-    public void delete(Shelf shelf) {
-        jpaRepository.delete(shelf);
-    }
-
-    @Override
     public Optional<Shelf> findById(Long shelfId) {
         return jpaRepository.findById(shelfId);
     }
 
     @Override
-    public Optional<Shelf> findDefaultShelf(String memberId) {
+    public Optional<Shelf> findDefaultShelf(UUID memberId) {
         return jpaRepository.findByMemberIdAndIsDefaultTrue(memberId);
     }
 
     @Override
-    public List<Shelf> findAllOwned(String memberId) {
+    public List<Shelf> findAllOwned(UUID memberId) {
         return jpaRepository.findByMemberIdOrderByIsDefaultDescCreatedAtAsc(memberId);
     }
 }

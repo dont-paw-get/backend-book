@@ -1,7 +1,9 @@
 package com.chc.dpgb.library.application;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -29,7 +31,7 @@ public class ShelfService {
     }
 
     @Transactional
-    public Shelf getOrCreateDefaultShelf(String memberId) {
+    public Shelf getOrCreateDefaultShelf(UUID memberId) {
         Optional<Shelf> existing = shelfRepository.findDefaultShelf(memberId);
         if (existing.isPresent()) {
             return existing.get();
@@ -42,7 +44,7 @@ public class ShelfService {
     }
 
     @Transactional
-    public Shelf createShelf(String memberId, String name) {
+    public Shelf createShelf(UUID memberId, String name) {
         try {
             return shelfRepository.save(Shelf.create(memberId, name, false));
         } catch (IllegalArgumentException e) {
@@ -50,7 +52,7 @@ public class ShelfService {
         }
     }
 
-    public List<Shelf> getShelves(String memberId) {
+    public List<Shelf> getShelves(UUID memberId) {
         getOrCreateDefaultShelf(memberId);
         return shelfRepository.findAllOwned(memberId);
     }
@@ -61,7 +63,7 @@ public class ShelfService {
     }
 
     @Transactional
-    public Shelf updateShelf(String memberId, Long shelfId, String name) {
+    public Shelf updateShelf(UUID memberId, Long shelfId, String name) {
         Shelf shelf = getOwnedShelf(memberId, shelfId);
         try {
             shelf.rename(name);
@@ -72,7 +74,7 @@ public class ShelfService {
     }
 
     @Transactional
-    public void deleteShelf(String memberId, Long shelfId) {
+    public void deleteShelf(UUID memberId, Long shelfId) {
         Shelf shelf = getOwnedShelf(memberId, shelfId);
         if (shelf.isDefault()) {
             throw new DefaultShelfCannotBeDeletedException();
@@ -85,11 +87,12 @@ public class ShelfService {
             book.changeShelfId(defaultShelf.getShelfId(), newRank);
             libraryBookRepository.save(book);
         }
-        shelfRepository.delete(shelf);
+        shelf.softDelete(Instant.now());
+        shelfRepository.save(shelf);
     }
 
     @Transactional(readOnly = true)
-    public Shelf getOwnedShelf(String memberId, Long shelfId) {
+    public Shelf getOwnedShelf(UUID memberId, Long shelfId) {
         Shelf shelf = shelfRepository.findById(shelfId).orElseThrow(ShelfNotFoundException::new);
         if (!shelf.getMemberId().equals(memberId)) {
             throw new ShelfAccessDeniedException();

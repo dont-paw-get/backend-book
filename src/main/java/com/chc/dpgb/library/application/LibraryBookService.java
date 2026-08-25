@@ -1,7 +1,9 @@
 package com.chc.dpgb.library.application;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -18,7 +20,9 @@ import com.chc.dpgb.common.exception.InvalidReorderTargetException;
 import com.chc.dpgb.common.exception.InvalidShelfTargetException;
 import com.chc.dpgb.common.exception.LibraryBookAccessDeniedException;
 import com.chc.dpgb.common.exception.LibraryBookNotFoundException;
+import com.chc.dpgb.library.domain.Genre;
 import com.chc.dpgb.library.domain.LibraryBook;
+import com.chc.dpgb.library.domain.ReadingStatus;
 import com.chc.dpgb.library.domain.Shelf;
 import com.chc.dpgb.library.domain.ShelfRank;
 import com.chc.dpgb.library.domain.ShelfRankExhaustedException;
@@ -29,28 +33,33 @@ public class LibraryBookService {
     private final LibraryBookRepository libraryBookRepository;
     private final ShelfRepository shelfRepository;
     private final ShelfService shelfService;
+    private final ScrapService scrapService;
 
     LibraryBookService(
             LibraryBookRepository libraryBookRepository,
             ShelfRepository shelfRepository,
-            ShelfService shelfService
+            ShelfService shelfService,
+            ScrapService scrapService
     ) {
         this.libraryBookRepository = libraryBookRepository;
         this.shelfRepository = shelfRepository;
         this.shelfService = shelfService;
+        this.scrapService = scrapService;
     }
 
     @Transactional
     public LibraryBook createLibraryBook(
-            String memberId,
+            UUID memberId,
             Long requestedShelfId,
             String title,
             String author,
             String isbn,
+            Genre genre,
             String publisher,
             LocalDate publishedDate,
             String coverUrl,
-            int totalPages
+            ReadingStatus readingStatus,
+            Integer totalPages
     ) {
         Shelf shelf = resolveShelf(memberId, requestedShelfId);
         if (isbn != null && libraryBookRepository.existsByIsbn(memberId, isbn)) {
@@ -67,9 +76,11 @@ public class LibraryBookService {
                     title,
                     author,
                     isbn,
+                    genre,
                     publisher,
                     publishedDate,
                     coverUrl,
+                    readingStatus,
                     totalPages
             );
         } catch (IllegalArgumentException e) {
@@ -85,7 +96,7 @@ public class LibraryBookService {
 
     @Transactional(readOnly = true)
     public Page<LibraryBook> getLibraryBooks(
-            String memberId,
+            UUID memberId,
             Long shelfId,
             String author,
             LibrarySortBy sortBy,
@@ -108,25 +119,27 @@ public class LibraryBookService {
     }
 
     @Transactional(readOnly = true)
-    public LibraryBook getLibraryBook(String memberId, Long bookId) {
+    public LibraryBook getLibraryBook(UUID memberId, Long bookId) {
         return getOwnedBook(memberId, bookId);
     }
 
     @Transactional
     public LibraryBook updateLibraryBook(
-            String memberId,
+            UUID memberId,
             Long bookId,
             String title,
             String author,
             String isbn,
+            Genre genre,
             String publisher,
             LocalDate publishedDate,
             String coverUrl,
-            int totalPages
+            ReadingStatus readingStatus,
+            Integer totalPages
     ) {
         LibraryBook book = getOwnedBook(memberId, bookId);
         try {
-            book.updateMetadata(title, author, isbn, publisher, publishedDate, coverUrl, totalPages);
+            book.updateMetadata(title, author, isbn, genre, publisher, publishedDate, coverUrl, readingStatus, totalPages);
         } catch (IllegalArgumentException e) {
             throw new InvalidBookDataException(e.getMessage());
         }
@@ -134,14 +147,17 @@ public class LibraryBookService {
     }
 
     @Transactional
-    public void deleteLibraryBook(String memberId, Long bookId) {
+    public void deleteLibraryBook(UUID memberId, Long bookId) {
         LibraryBook book = getOwnedBook(memberId, bookId);
-        libraryBookRepository.delete(book);
+        Instant now = Instant.now();
+        book.softDelete(now);
+        libraryBookRepository.save(book);
+        scrapService.softDeleteAllByBookId(bookId, now);
     }
 
     @Transactional
     public LibraryBook reorderLibraryBook(
-            String memberId,
+            UUID memberId,
             Long bookId,
             Long beforeBookId,
             Long afterBookId
@@ -168,7 +184,7 @@ public class LibraryBookService {
     }
 
     @Transactional
-    public LibraryBook moveLibraryBookToShelf(String memberId, Long bookId, Long targetShelfId) {
+    public LibraryBook moveLibraryBookToShelf(UUID memberId, Long bookId, Long targetShelfId) {
         LibraryBook book = getOwnedBook(memberId, bookId);
         Shelf targetShelf = shelfRepository.findById(targetShelfId)
                 .filter(shelf -> shelf.getMemberId().equals(memberId))
@@ -180,10 +196,10 @@ public class LibraryBookService {
 
     @Transactional
     public LibraryBook updateReadingProgress(
-            String memberId,
+            UUID memberId,
             Long bookId,
             int currentPage,
-            int totalPages
+            Integer totalPages
     ) {
         LibraryBook book = getOwnedBook(memberId, bookId);
         try {
@@ -194,7 +210,7 @@ public class LibraryBookService {
         return libraryBookRepository.save(book);
     }
 
-    private Shelf resolveShelf(String memberId, Long requestedShelfId) {
+    private Shelf resolveShelf(UUID memberId, Long requestedShelfId) {
         if (requestedShelfId == null) {
             return shelfService.getOrCreateDefaultShelf(memberId);
         }
@@ -203,7 +219,7 @@ public class LibraryBookService {
                 .orElseThrow(InvalidBookDataException::new);
     }
 
-    private LibraryBook getOwnedBook(String memberId, Long bookId) {
+    private LibraryBook getOwnedBook(UUID memberId, Long bookId) {
         LibraryBook book = libraryBookRepository.findById(bookId)
                 .orElseThrow(LibraryBookNotFoundException::new);
         if (!book.getMemberId().equals(memberId)) {
