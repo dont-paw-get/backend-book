@@ -21,4 +21,6 @@
 - [`0006-update-library-book-full-payload.md`](./decisions/0006-update-library-book-full-payload.md): `updateLibraryBook`을 부분 수정에서 `Scrap.updateScrap`과 동일한 전체 필드 포함(`null`=삭제) 방식으로 통일한 근거
 - [`0007-drop-title-author-duplicate-check.md`](./decisions/0007-drop-title-author-duplicate-check.md): ISBN 없는 도서의 제목·저자 기반 중복 판정 제거 근거(ISBN 유일성 판정만 남김)
 - [`0008-shelf-management.md`](./decisions/0008-shelf-management.md): 책장(Shelf) 관리 신규 도입, `shelfRank` 범위를 사용자 전역에서 책장별로 재조정한 근거
-- [`0009-remove-representative-librarian-selection.md`](./decisions/0009-remove-representative-librarian-selection.md): 대표 사서 선택(`getMyLibrarian`/`selectMyLibrarian`)을 Member 서비스로 이관, Book Service는 사서 마스터 카탈로그(`getLibrarians`)만 유지
+- [`0009-remove-representative-librarian-selection.md`](./decisions/0009-remove-representative-librarian-selection.md): 대표 사서 선택(`getMyLibrarian`/`selectMyLibrarian`)을 Member 서비스로 이관, Book Service는 사서 마스터 카탈로그(`getLibrarians`)만 유지 (ADR-0011로 대체됨)
+- [`0010-reintroduce-genre-and-reading-status.md`](./decisions/0010-reintroduce-genre-and-reading-status.md): `genre`(ADR-0003 부분 반전)·`readingStatus`(ADR-0005 전체 반전) 재도입, `totalPages` 선택 필드 전환 근거
+- [`0011-librarian-ownership-model.md`](./decisions/0011-librarian-ownership-model.md): 사서를 마스터 카탈로그에서 회원 소유 인스턴스(레벨/경험치/대표 여부)로 재정의, 대표 사서 선택을 Book Service로 재통합(ADR-0009 대체) 근거

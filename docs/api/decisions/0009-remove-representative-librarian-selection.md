@@ -22,3 +22,7 @@ Member 서비스 쪽 ERD 초안을 검토하던 중 `member` 테이블에 `repre
 - `com.chc.dpgb.librarian` 패키지에서 `MemberLibrarianSelection`(domain), `MemberLibrarianSelectionRepository`+JPA 어댑터(application/infrastructure), `LibrarianService.getMyLibrarian`/`selectMyLibrarian`, `LibrarianController`의 해당 두 메서드, `MyLibrarianResponse`/`SelectLibrarianRequest`(web/dto)를 제거했다. `Librarian`(마스터)/`LibrarianRepository`/`LibrarianService.getLibrarians`/`LibrarianController.getLibrarians`는 그대로 유지한다.
 - `getLibrarians`가 `librarianId` 유효성 검사의 유일한 참조 지점이 아니게 됐다 — Member 서비스가 `selectMyLibrarian`을 구현할 때 `librarianId` 유효성을 어떻게 검증할지(자체 카탈로그 사본을 두는지, Book Service의 `GET /api/v1/librarians`를 호출하는지)는 이 ADR의 범위 밖이며 Member 서비스 쪽에서 별도로 결정한다.
 - 회원 탈퇴 시 Member 서비스의 `email`/`nickname` 익명화 정책, 그리고 탈퇴한 회원의 Book Service 데이터(서재/책장/스크랩) 처리는 이 ADR과 별개로 논의됐다 — 후자는 이벤트/알림 인프라가 아직 없어 지금 단계에서는 손대지 않기로 하고 `.harness/BACKLOG.md`로 이연했다.
+
+## 이후 반전됨
+
+**이 ADR 전체가 ADR-0011로 반전됐다** — 사서가 단순 "마스터 카탈로그 + 대표 선택"에서 회원이 획득해 레벨·경험치를 쌓는 소유 인스턴스로 재정의되면서, 대표 사서 선택·조회를 Book Service가 다시 소유한다. `member_librarian_selection` 자체는 부활하지 않았고(`librarian` 테이블이 `is_representative` 컬럼을 직접 가짐), 회원 탈퇴 시 Book Service 데이터 처리 이연 결정은 그대로 유효하다.

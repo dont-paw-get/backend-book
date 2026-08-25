@@ -1,16 +1,17 @@
 // Book Service ERD
-// 2026-08-25 확정된 DB 스키마 개편 방향(.harness/DECISIONS.md 참조)을 반영한 목표 스키마다.
-// 아직 Flyway 마이그레이션(V7~)으로 구현되지 않았다 — 실제 마이그레이션을 작성하면 이 파일과 다시 맞춰 확인한다.
+// src/main/resources/db/migration의 V1~V9(Flyway) 적용 후 최종 스키마를 그대로 옮긴 것이다.
+// 마이그레이션이 추가/변경되면 이 파일도 함께 갱신해야 한다(자동 동기화 없음).
 // dbdiagram.io 등 DBML 렌더러에 붙여넣으면 다이어그램으로 볼 수 있다.
 //
-// 이번 개편의 핵심 변경: PK 컬럼명을 전 테이블 `id`로 통일, `member_id`를 UUID로 변경,
+// 2026-08-25 DB 스키마 대개편(ADR-0010/ADR-0011, .harness/DECISIONS.md 참조)의 핵심 변경:
+// PK 컬럼명을 전 테이블 `id`로 통일, `member_id`를 UUID로 변경,
 // shelf/library_book/scrap/librarian 4개 aggregate에 soft delete(deleted_at) 도입,
-// library_book에 genre/reading_status 재도입(ADR-0003/ADR-0005 반전),
+// library_book에 genre/reading_status 재도입(ADR-0003 부분/ADR-0005 전체 반전),
 // librarian을 마스터 카탈로그에서 회원이 실제로 보유하는 인스턴스(레벨·경험치·대표 여부)로 전환하고
-// 대표 사서 선택(is_representative)을 Book Service가 다시 소유(ADR-0009를 대체하는 결정,
-// ADR 문서 자체는 아직 갱신 전 — .harness/PLAN.md TODO 참조). 타입별 공통 이미지는 신규
-// librarian_type_info가, 레벨 정책은 신규 librarian_level이 담당한다. 기존 librarian의
-// evolution_stage 컬럼은 새 스키마에 없어 폐기됐다.
+// 대표 사서 선택(is_representative)을 Book Service가 다시 소유(ADR-0009를 대체, ADR-0011).
+// 타입별 공통 이미지는 신규 librarian_type_info가, 레벨 정책은 신규 librarian_level이 담당한다
+// (librarian_level은 DB 테이블만 있고 JPA 엔티티는 아직 없음 — YAGNI, ARCHITECTURE.md 참조).
+// 기존 librarian의 evolution_stage 컬럼은 새 스키마에 없어 폐기됐다.
 
 Table shelf {
   id         bigint [pk, increment]

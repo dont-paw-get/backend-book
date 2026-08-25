@@ -34,3 +34,8 @@ CLIAR-43에서 이 저장소(Book Service)가 실제로 담당하는 기능을 "
 - API 계약이 실제 담당 범위(단순 CRUD)와 다른 MSA 컴포넌트의 책임(이미지 인식, AI 분석, 파일 저장, 오늘의 기분 추천)을 명확히 분리한다.
 - `.harness/DOMAIN.md`에 Scrap·Librarian aggregate 규칙을 새로 추가하고, LibraryBook aggregate에서 `genre`·`moodTags`·`language`를 제거했다.
 - 도메인 구현(`LibraryBook`, `Scrap`, `Librarian`, `MemberLibrarianSelection` 등)과 계약 테스트는 아직 시작하지 않았다 — `.harness/PLAN.md` 참조.
+
+## 이후 반전됨
+
+- **결정 1(`genre` 제거)만 ADR-0010으로 반전됐다** — `library_book`에 `genre`가 재도입됐다. `moodTags`/`language` 제거, OCR·AI 엔드포인트 삭제, 알라딘 단일 소스화 등 나머지 결정은 그대로 유효하다.
+- **결정 6(Librarian 리소스)은 ADR-0011로 전면 재설계됐다** — `type`은 더 이상 "서버가 관리하는 자유 문자열"이 아니라 고정 enum(`RUSSIAN_BLUE`/`SHOEBILL`)이고, "사서 마스터 목록 조회 + 대표 사서 선택"이 "타입 카탈로그 조회 + 회원별 사서 획득/개명/방출 + 대표 지정"으로 확장됐다.

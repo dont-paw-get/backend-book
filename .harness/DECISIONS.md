@@ -1,5 +1,15 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-25 (계속): DB 스키마 대개편 구현 중 발견한 기술적 결정 — soft delete 구현 방식, totalPages nullable 동작, LibrarianLevel 엔티티 보류
+
+- **soft delete를 `@SQLRestriction`으로 구현:** 서비스/리포지토리마다 `deleted_at IS NULL` 조건을 반복하지 않고, `Shelf`/`LibraryBook`/`Scrap`/`Librarian` 엔티티 클래스에 Hibernate `@SQLRestriction("deleted_at IS NULL")`(6.3+, 구 `@Where` 대체)을 붙여 모든 조회(파생 쿼리·JPQL·`findById` 포함)에 자동 적용되게 했다. 하드 `delete()` 포트 메서드는 4개 aggregate 모두 제거하고, 서비스가 `entity.softDelete(Instant.now()); repository.save(entity);`로 통일했다.
+- **`LibraryBook.totalPages` nullable 전환에 따른 도메인 규칙 확장:** DB가 `total_pages`를 nullable로 바꾼 것을 그대로 따라 `totalPages`를 `Integer`로, `progress()`가 `totalPages`가 없으면 `null`을 반환하도록 확장했다. 이 판단의 근거는 이미 `.harness/DOMAIN.md`에 있던 서술("알라딘 API가 totalPages를 대부분 제공하지 않아 사용자가 직접 입력해야 하는 것이 일반적인 경로")이 실제로는 여전히 필수값으로 강제되고 있던 모순을 해소한 것 — 별도 확인 없이 스키마 변경의 자연스러운 연장으로 판단해 진행했다.
+- **`ReadingStatus` 값 재정의:** ADR-0005가 제거했던 것과 값 구성이 다르다(`PLANNED`/`READING`/`COMPLETED`, 구버전은 `NOT_STARTED`/`READING`/`COMPLETED`) — 사용자가 제공한 SQL의 정확한 값을 그대로 따랐다. 독립 필드로 두고 `progress`와의 자동 연동 로직은 만들지 않았다(스키마/CRUD 범위 확정과 일치).
+- **`LibrarianLevel` 엔티티는 만들지 않음(YAGNI):** DB 테이블(`librarian_level`)과 FK 제약은 V9 마이그레이션으로 만들었지만, 레벨업 로직이 이번 범위 밖이라 앱 코드 어디서도 레벨 정책 값을 조회하지 않는다. JPA 엔티티 없이 순수 DB 제약으로만 남겨뒀다 — 레벨업 API를 실제로 만들 때 추가.
+- **네이티브 Postgres enum 매핑 패턴 확립:** `genre_type`/`book_reading_status`/`librarian_type` 3종 모두 `@Enumerated(EnumType.STRING) + @JdbcTypeCode(SqlTypes.NAMED_ENUM)`(Hibernate 6.2+)으로 매핑했다 — 이 저장소 최초의 네이티브 enum 컬럼 사용 사례. 이후 네이티브 enum 컬럼을 추가할 때 이 패턴을 따른다.
+- **`CLIAR-45`의 "책 삭제 시 스크랩 cascade" 통합 테스트 제거:** `ON DELETE CASCADE`가 V8에서 제거되면서 그 테스트의 전제 자체가 사라졌다. DB 레벨 cascade 검증 대신, 캐스케이드는 이제 `LibraryBookService.deleteLibraryBook` → `ScrapService.softDeleteAllByBookId` 오케스트레이션으로 이동했고, 이는 `LibraryBookServiceTest`/`ScrapServiceTest`(Mockito 단위 테스트)로 검증한다.
+- **영향받은 문서:** `.harness/STATE.md`(구현 완료 단계 반영). `docs/api/openapi.yaml`/`DOMAIN.md`/`ARCHITECTURE.md`/신규 ADR/`BACKLOG.md`는 아직 이 구현을 반영하지 않았다 — `.harness/PLAN.md` 참조.
+
 ## 2026-08-25: DB 스키마 대개편 방향 확정 — genre/reading_status 재도입, librarian 소유 모델 전면 개편(ADR-0009 대체), soft delete 전 aggregate 도입
 
 - **배경:** 사용자가 `shelf`/`library_book`/`scrap`/`librarian`(+신규 `librarian_level`/`librarian_type_info`)을 아우르는 확정 SQL을 제공했다. 스키마 자체(PK `id` 통일, `member_id` UUID화, 전 aggregate `deleted_at` soft delete, `genre`/`reading_status` 컬럼 재도입, `librarian`의 마스터→회원 소유 인스턴스 전환)는 이 SQL을 그대로 소스로 삼기로 확정했다.
@@ -9,8 +19,16 @@
 - **`librarian_level` 시드 범위 확정:** 이번엔 `level=1, required_experience=0` 최소치만 시드하고, 나머지 레벨 정책 값은 미정 상태로 `.harness/BACKLOG.md`에 이연한다.
 - **`evolution_stage` 컬럼 폐기 확정:** 기존 `librarian`(마스터 카탈로그) 테이블에 있던 필드였지만, 신규 SQL(`librarian`도 `librarian_type_info`도)에는 없다 — 이 개념 자체를 제거하는 것으로 간주한다.
 - **기술적 이슈 발견:** 사용자가 제공한 SQL은 `librarian`을 `librarian_type_info`보다 먼저 `CREATE TABLE`하면서 그 테이블을 참조하는 FK(`type librarian_type NOT NULL REFERENCES librarian_type_info (type)`)를 걸고 있어 순서상 오류다 — 실제 Flyway 마이그레이션에서는 `librarian_type` enum → `librarian_type_info` → `librarian_level` → `librarian` 순으로 재배열해야 한다.
-- **아직 미확정(구현 착수 전 사용자 확인 필요):** API 엔드포인트 정확한 설계(제안만 있는 상태), 사서 개명(이름 변경) 허용 여부, Flyway 마이그레이션을 몇 개 파일로 나눌지, soft delete 부수효과 기본안(Shelf 삭제 시 책 이동 유지, LibraryBook 삭제 시 Scrap 벌크 soft delete) 확정 여부, 사서 삭제(방출) API 필요 여부 — `.harness/PLAN.md`에 우선순위 TODO로 정리했다.
-- **영향받은 문서:** `.harness/PLAN.md`(설계 논의 서술을 TODO 체크리스트로 재정리). 실제 구현은 아직 시작 전 — Flyway 마이그레이션, 엔티티/서비스/컨트롤러, `docs/api/openapi.yaml`, `docs/db/erd.dbml`, `.harness/DOMAIN.md`/`ARCHITECTURE.md`, 신규 ADR, `.harness/BACKLOG.md`는 위 미확정 항목이 정리된 뒤 착수한다.
+- **영향받은 문서:** `.harness/PLAN.md`(설계 논의 서술을 TODO 체크리스트로 재정리). 실제 구현은 아직 시작 전 — Flyway 마이그레이션, 엔티티/서비스/컨트롤러, `docs/api/openapi.yaml`, `docs/db/erd.dbml`, `.harness/DOMAIN.md`/`ARCHITECTURE.md`, 신규 ADR, `.harness/BACKLOG.md`는 아래 2026-08-25(계속) 결정이 정리된 뒤 착수한다.
+
+## 2026-08-25 (계속): DB 스키마 대개편 남은 결정 사항 확정 — API 설계·개명·삭제 API·마이그레이션 분할·soft delete 부수효과
+
+- **librarian API 엔드포인트 설계 확정:** `.harness/PLAN.md`에 제안했던 구조 그대로 진행 — `GET /api/v1/librarian-types`(타입 카탈로그, 기존 `getLibrarians` 대체), `POST /api/v1/librarians`(사서 획득, `type`+`name` 필수, 타입별 1마리 제약 409), `GET /api/v1/librarians`(내 보유 목록), `PATCH /api/v1/librarians/{id}`(이름 변경), `PATCH /api/v1/librarians/{id}/representative`(대표 지정), `GET /api/v1/librarians/representative`(대표 조회), `DELETE /api/v1/librarians/{id}`(방출, 아래 참조).
+- **사서 개명(이름 변경) 허용 확정:** 언제든 `PATCH /api/v1/librarians/{id}`로 이름을 바꿀 수 있다 — 등록 시 1회 고정이 아니라 다른 aggregate와 동일한 CRUD 관례를 따른다.
+- **사서 삭제(방출) API 확정:** 이번 범위에 포함한다. `DELETE /api/v1/librarians/{id}`가 soft delete(`deleted_at`)로 처리한다 — 하드 삭제 아님, 다른 aggregate(Shelf/LibraryBook/Scrap)와 동일한 soft delete 정책을 따른다.
+- **Flyway 마이그레이션 분할 확정:** 하나로 묶지 않고 aggregate별로 여러 파일로 분리한다 — 예: `V7__rescope_shelf_and_library_book.sql`(shelf/library_book PK·UUID·soft delete·genre/reading_status), `V8__rescope_scrap.sql`(scrap PK·soft delete·scrap_image_url), `V9__redesign_librarian.sql`(librarian_type enum·librarian_type_info·librarian_level·librarian 전면 개편) — 각 단계를 독립적으로 검증/롤백할 수 있게 한다. 정확한 파일명은 구현 시점에 재확인.
+- **soft delete 부수효과 기본안 확정:** 제안대로 진행 — 전 조회 쿼리에 `deleted_at IS NULL` 일괄 적용. Shelf 삭제는 소속 LibraryBook 전부를 기본 책장으로 이동시킨 뒤 그 Shelf 행만 soft delete(기존 하드 삭제 동작 유지, soft delete로만 전환). LibraryBook soft delete 시 소속 Scrap 전체를 애플리케이션이 벌크로 soft delete(기존 DB `ON DELETE CASCADE`를 대체).
+- **영향받은 문서:** `.harness/PLAN.md`에서 "우선순위 1" 섹션이 모두 해소되어 제거되고 구현 체크리스트만 남았다.
 
 ## 2026-08-21: DB 정책 재반전 — MSA 원칙에 맞게 서비스별 PostgreSQL 분리로 되돌림
 
@@ -65,6 +83,7 @@
 
 - 상세 배경과 결정 목록은 `docs/api/decisions/0003-scope-narrowing-and-new-resources.md`(ADR-0003) 참조 — API wire 계약 결정은 `docs/api`가 소유하므로 이 문서에는 요약만 남긴다.
 - 핵심: 장르(`genre`)·무드(`moodTags`)·`language` 완전 제거, 표지 OCR·AI 도서 분석 엔드포인트 삭제, 외부 도서 검색을 알라딘 API 단일 소스로 한정, 스크랩(Scrap)·동물 사서(Librarian)를 신규 리소스로 추가.
+- **이후 반전됨 — 장르(`genre`)만:** 2026-08-25 결정(DB 스키마 대개편, 위 참조)으로 `genre` 제거만 다시 반전되어 `library_book`에 재도입됐다. `moodTags`/`language` 제거, OCR·AI 엔드포인트 삭제, 알라딘 단일 소스화, Scrap/Librarian 신규 편입 등 이 결정의 나머지는 그대로 유효하다.
 - **기존 결정 반전 1 — 스크랩 범위:** `docs/api/decisions/0002-library-book-schema-fixes.md`가 "문장 OCR·감상·비밀 메모는 다른 MSA 컴포넌트 담당이라 범위 밖"이라고 명시했던 것을, 사용자가 담당 기능표를 다시 확인하면서 스크랩 CRUD를 이 저장소 범위로 재편입하는 것으로 뒤집었다. 문장을 이미지에서 추출하는 OCR 자체(텍스트 인식)는 여전히 범위 밖이다.
 - **기존 결정 반전 2 — `language`:** 같은 ADR-0002가 "사용자가 선택 입력, 생략 시 서버가 `ko`로 채운다"로 도입했던 `language` 필드를, 알라딘 API가 언어 정보를 전혀 제공하지 않고 담당 기능표에도 없어 전 스키마·필터에서 제거했다.
 - **알라딘 API 실제 응답 확인:** 사용자가 제공한 실제 알라딘 API 예시로 두 가지를 확인했다. (1) `totalPages`(페이지 수)는 대부분의 도서에서 응답에 아예 없다 — 선택 필드로 유지하고, 사용자 직접 입력이 예외가 아니라 일반 경로임을 문서에 명시했다. (2) `author`는 "이름 (지은이)" 형식의 역할 라벨이 붙은 결합 문자열이라, 서버가 역할 라벨을 제거하고 이름만(여러 명이면 쉼표로 구분) 반환하도록 정했다 — 원문 그대로 저장하면 저자 필터·정렬·중복 판정이 깨지기 때문. 파싱 로직은 아직 구현 전이며 `.harness/PLAN.md`의 Book Discovery API 섹션에 체크리스트로 남겼다.
