@@ -1,5 +1,6 @@
 package com.chc.dpgb.library.infrastructure;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -24,11 +25,6 @@ class ScrapRepositoryJpaAdapter implements ScrapRepository {
     }
 
     @Override
-    public void delete(Scrap scrap) {
-        jpaRepository.delete(scrap);
-    }
-
-    @Override
     public Optional<Scrap> findById(Long scrapId) {
         return jpaRepository.findById(scrapId);
     }
@@ -36,5 +32,10 @@ class ScrapRepositoryJpaAdapter implements ScrapRepository {
     @Override
     public Page<Scrap> findPageByBookId(Long bookId, Pageable pageable) {
         return jpaRepository.findByBookIdOrderByCreatedAtAsc(bookId, pageable);
+    }
+
+    @Override
+    public List<Scrap> findAllByBookId(Long bookId) {
+        return jpaRepository.findAllByBookId(bookId);
     }
 }

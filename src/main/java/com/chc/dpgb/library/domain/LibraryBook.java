@@ -2,12 +2,18 @@ package com.chc.dpgb.library.domain;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.SQLRestriction;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -16,16 +22,17 @@ import lombok.Getter;
 
 @Entity
 @Table(name = "library_book")
+@SQLRestriction("deleted_at IS NULL")
 @Getter
 public class LibraryBook {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "book_id")
+    @Column(name = "id")
     private Long bookId;
 
     @Column(name = "member_id", nullable = false)
-    private String memberId;
+    private UUID memberId;
 
     @Column(name = "shelf_id", nullable = false)
     private Long shelfId;
@@ -41,6 +48,11 @@ public class LibraryBook {
 
     private String isbn;
 
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(nullable = false)
+    private Genre genre;
+
     private String publisher;
 
     @Column(name = "published_date")
@@ -49,7 +61,12 @@ public class LibraryBook {
     @Column(name = "cover_url")
     private String coverUrl;
 
-    @Column(name = "total_pages", nullable = false)
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "reading_status", nullable = false)
+    private ReadingStatus readingStatus;
+
+    @Column(name = "total_pages")
     private Integer totalPages;
 
     @Column(name = "current_page", nullable = false)
@@ -63,12 +80,16 @@ public class LibraryBook {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
     protected LibraryBook() {
     }
 
     private LibraryBook(
-            String memberId, Long shelfId, String shelfRank, String title, String author, String isbn,
-            String publisher, LocalDate publishedDate, String coverUrl, int totalPages
+            UUID memberId, Long shelfId, String shelfRank, String title, String author, String isbn,
+            Genre genre, String publisher, LocalDate publishedDate, String coverUrl,
+            ReadingStatus readingStatus, Integer totalPages
     ) {
         this.memberId = memberId;
         this.shelfId = shelfId;
@@ -76,26 +97,29 @@ public class LibraryBook {
         this.title = title;
         this.author = author;
         this.isbn = isbn;
+        this.genre = genre == null ? Genre.NONE : genre;
         this.publisher = publisher;
         this.publishedDate = publishedDate;
         this.coverUrl = coverUrl;
+        this.readingStatus = readingStatus == null ? ReadingStatus.PLANNED : readingStatus;
         this.currentPage = 0;
         changeTotalPages(totalPages);
     }
 
     public static LibraryBook register(
-            String memberId, Long shelfId, String shelfRank, String title, String author, String isbn,
-            String publisher, LocalDate publishedDate, String coverUrl, int totalPages
+            UUID memberId, Long shelfId, String shelfRank, String title, String author, String isbn,
+            Genre genre, String publisher, LocalDate publishedDate, String coverUrl,
+            ReadingStatus readingStatus, Integer totalPages
     ) {
         return new LibraryBook(
-                memberId, shelfId, shelfRank, title, author, isbn, publisher, publishedDate, coverUrl,
-                totalPages
+                memberId, shelfId, shelfRank, title, author, isbn, genre, publisher, publishedDate, coverUrl,
+                readingStatus, totalPages
         );
     }
 
     public void updateMetadata(
-            String title, String author, String isbn, String publisher, LocalDate publishedDate,
-            String coverUrl, int totalPages
+            String title, String author, String isbn, Genre genre, String publisher, LocalDate publishedDate,
+            String coverUrl, ReadingStatus readingStatus, Integer totalPages
     ) {
         if (title == null) {
             throw new IllegalArgumentException("title은 null일 수 없습니다.");
@@ -103,21 +127,32 @@ public class LibraryBook {
         if (author == null) {
             throw new IllegalArgumentException("author는 null일 수 없습니다.");
         }
+        if (genre == null) {
+            throw new IllegalArgumentException("genre는 null일 수 없습니다.");
+        }
+        if (readingStatus == null) {
+            throw new IllegalArgumentException("readingStatus는 null일 수 없습니다.");
+        }
         this.title = title;
         this.author = author;
         this.isbn = isbn;
+        this.genre = genre;
         this.publisher = publisher;
         this.publishedDate = publishedDate;
         this.coverUrl = coverUrl;
+        this.readingStatus = readingStatus;
         changeTotalPages(totalPages);
     }
 
-    public void updateProgress(int currentPage, int totalPages) {
+    public void updateProgress(int currentPage, Integer totalPages) {
         changeTotalPages(totalPages);
-        if (currentPage < 0 || currentPage > this.totalPages) {
+        if (this.totalPages != null && (currentPage < 0 || currentPage > this.totalPages)) {
             throw new IllegalArgumentException(
                     "currentPage는 0 이상 totalPages(" + this.totalPages + ") 이하이어야 합니다: " + currentPage
             );
+        }
+        if (this.totalPages == null && currentPage < 0) {
+            throw new IllegalArgumentException("currentPage는 0 이상이어야 합니다: " + currentPage);
         }
         this.currentPage = currentPage;
     }
@@ -131,11 +166,26 @@ public class LibraryBook {
         this.shelfRank = newShelfRank;
     }
 
-    public double progress() {
+    public Double progress() {
+        if (totalPages == null) {
+            return null;
+        }
         return (currentPage * 100.0) / totalPages;
     }
 
-    private void changeTotalPages(int newTotalPages) {
+    public void softDelete(Instant deletedAt) {
+        this.deletedAt = deletedAt;
+    }
+
+    public boolean isDeleted() {
+        return deletedAt != null;
+    }
+
+    private void changeTotalPages(Integer newTotalPages) {
+        if (newTotalPages == null) {
+            this.totalPages = null;
+            return;
+        }
         if (newTotalPages <= 0) {
             throw new IllegalArgumentException("totalPages는 0보다 커야 합니다: " + newTotalPages);
         }

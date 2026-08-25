@@ -8,6 +8,12 @@
 
 **같은 작업에서 `language` 필드도 완전히 제거했다.** ADR-0002가 도입했던 "사용자가 선택 입력, 생략 시 서버가 `ko`로 채운다"는 규칙은 더 이상 유효하지 않다 — 알라딘 API가 언어 정보를 전혀 제공하지 않고, 담당 기능표에도 언어 관리 기능이 없어 LibraryBook aggregate에서 제거했다.
 
+## 논리 삭제 (ADR-0010/ADR-0011 계기로 전 aggregate 공통 규칙화)
+
+- `LibraryBook`/`Shelf`/`Scrap`/`Librarian` 4개 aggregate 모두 하드 삭제 대신 논리 삭제(soft delete, `deletedAt`)를 쓴다. 삭제된 행은 어떤 조회에도 나타나지 않는다 — 다시 조회하면 404다.
+- 책장(Shelf) 삭제는 기존 규칙(소속 책을 기본 책장으로 이동)을 그대로 유지하되, 마지막 단계가 하드 삭제에서 논리 삭제로 바뀌었을 뿐이다.
+- 스크랩(Scrap)의 "책 삭제 시 함께 삭제" 규칙도 유지하되, DB 외래키 `ON DELETE CASCADE`가 아니라 애플리케이션이 책 논리 삭제와 같은 트랜잭션에서 그 책의 스크랩 전체를 명시적으로 논리 삭제한다(CLIAR-45 당시의 DB cascade 방식에서 변경).
+
 ## 외부 도서 검색 → LibraryBook 생성 경계
 
 - 알라딘 API 검색 결과(또는 검색 결과가 없어 사용자가 직접 입력한 값 — 폴백)는 사용자가 서재 등록을 확정하기 전까지는 후보 데이터다.
@@ -25,7 +31,8 @@
 - 소속 책장 `shelfId`(Shelf aggregate 참조, 필수) — 등록 시 생략하면 사용자의 기본 책장에 배치
 - 책장 내 순서 `shelfRank` (LexoRank 방식의 불투명한 문자열 순서 키, 등록 시점에 서버가 그 책장의 맨 뒤 순서로 부여하고 등록 응답에 포함한다)
 - 확인된 책 메타데이터: `title`, `author`, `isbn`, `publisher`, `publishedDate`, `coverUrl`
-- `totalPages`, `currentPage`
+- `genre`(선택, 생략 시 `NONE`), `readingStatus`(선택, 생략 시 `PLANNED`) — ADR-0010으로 재도입. 둘 다 `progress`와 자동 연동되지 않는 독립 필드다.
+- `totalPages`(선택 — 알라딘 API가 제공하지 않는 도서가 많아 등록 시점에 모를 수 있다), `currentPage`
 - 생성·수정 시각
 
 모든 조회와 변경은 aggregate 소유자(`memberId`) 기준으로 수행한다.
@@ -34,7 +41,7 @@
 
 ### `updateLibraryBook` 수정 방식 (ADR-0006)
 
-`updateLibraryBook`은 부분 수정이 아니라 `title`/`author`/`isbn`/`publisher`/`publishedDate`/`coverUrl`/`totalPages` 7개 필드를 **항상 모두 포함**해야 하는 계약이다(`Scrap.updateScrap`과 동일한 방식). `isbn`/`publisher`/`publishedDate`/`coverUrl`는 nullable 필드라 `null`을 보내면 그 값을 삭제하고, 값을 보내면 교체한다. `title`/`author`/`totalPages`는 aggregate의 필수 불변값이라 `null`을 허용하지 않는다.
+`updateLibraryBook`은 부분 수정이 아니라 `title`/`author`/`isbn`/`genre`/`publisher`/`publishedDate`/`coverUrl`/`readingStatus`/`totalPages` 9개 필드를 **항상 모두 포함**해야 하는 계약이다(`Scrap.updateScrap`과 동일한 방식). `isbn`/`publisher`/`publishedDate`/`coverUrl`/`totalPages`는 nullable 필드라 `null`을 보내면 그 값을 삭제하고, 값을 보내면 교체한다. `title`/`author`/`genre`/`readingStatus`는 `null`을 허용하지 않는다 — 값을 없애고 싶으면 `genre`는 `NONE`을, `readingStatus`는 `PLANNED`를 명시적으로 보낸다.
 
 ### `shelfRank` (책장 내 순서, ADR-0004, ADR-0008로 범위 재조정)
 
@@ -63,7 +70,7 @@
 - 기본 책장은 삭제할 수 없다 — 시도하면 400(`DEFAULT_SHELF_CANNOT_BE_DELETED`).
 - 기본 책장의 이름은 다른 책장과 마찬가지로 자유롭게 바꿀 수 있다. "기본"이라는 성질은 `isDefault` 플래그로만 구분되고 이름과는 무관하다.
 - 책장 이름 중복은 서버가 막지 않는다 — 같은 사용자가 같은 이름의 책장을 여러 개 가질 수 있다(LibraryBook의 제목·저자 중복을 사용자 자율에 맡긴 ADR-0007과 같은 기조).
-- 책장을 삭제하면 그 안에 있던 모든 `LibraryBook`이 그 사용자의 기본 책장 맨 뒤로 이동한다(`shelfRank` 재계산 포함).
+- 책장을 삭제하면 그 안에 있던 모든 `LibraryBook`이 그 사용자의 기본 책장 맨 뒤로 이동한 뒤, 그 Shelf 행 자체가 논리 삭제된다(`shelfRank` 재계산 포함, 하드 삭제 아님 — "논리 삭제" 절 참조).
 - `LibraryBook`은 항상 정확히 하나의 책장에 속한다(`shelfId` 필수) — 등록 시 생략하면 기본 책장에 배치된다. 책장 간 이동은 `moveLibraryBookToShelf`로만 한다.
 - 모든 조회와 변경은 aggregate 소유자(`memberId`) 기준으로 수행한다 — 다른 사용자의 책장에 접근하면 403(`SHELF_ACCESS_DENIED`).
 
@@ -72,32 +79,55 @@
 소유하는 개념:
 
 - 소유자: 독립적으로 memberId를 갖지 않고 LibraryBook을 통해 귀속되는 하위 리소스다. 접근 권한 검증은 스크랩이 속한 LibraryBook의 소유자(`memberId`) 기준으로 한다.
-- `scrapId`, `bookId`, `sentence`(필수), `pageNumber`(선택), `memo`(선택), 생성·수정 시각
+- `scrapId`, `bookId`, `sentence`(필수), `pageNumber`(선택), `scrapImageUrl`(필수), `memo`(선택), 생성·수정 시각
 
 불변식:
 
 - `sentence`는 항상 값이 있어야 한다. 빈 문자열이나 삭제는 허용하지 않는다 — 문장 자체를 없애려면 스크랩을 삭제한다.
+- `scrapImageUrl`도 항상 값이 있어야 한다 — `null`이나 빈 문자열을 허용하지 않는다. `LibraryBook.coverUrl`과 같은 패턴으로 클라이언트가 URL 문자열을 그대로 전달하며, 파일 업로드 자체(S3 등)는 이 저장소 범위 밖이다.
 - `pageNumber`·`memo`는 선택 값이며 사용자가 추가·수정·삭제할 수 있다.
-- 스크랩 수정은 `sentence`/`pageNumber`/`memo` 세 필드를 항상 모두 포함해야 하는 계약이다(부분 생략 불가). `pageNumber`·`memo`에 `null`을 보내면 그 값을 삭제하고, 값을 보내면 교체한다. `sentence`는 `null`을 허용하지 않는다.
-- 스크랩에 이미지를 연결하는 기능(사진 촬영/업로드)은 이 저장소 범위 밖이다 — 파일 저장(S3 등)이 필요해 LibraryBook 표지와 같은 이유로 제외했다.
-- 소속 `LibraryBook`이 삭제되면 그 책에 속한 스크랩도 함께 삭제된다(cascade) — 스크랩은 옮겨질 다른 곳이 없는 순수 하위 리소스이기 때문(Shelf 삭제 시 책을 기본 책장으로 옮기는 것과 다른 지점). DB 외래키 `ON DELETE CASCADE`로 처리하고 애플리케이션 코드는 이를 별도로 알지 않는다(CLIAR-45).
+- 스크랩 수정은 `sentence`/`pageNumber`/`scrapImageUrl`/`memo` 네 필드를 항상 모두 포함해야 하는 계약이다(부분 생략 불가). `pageNumber`·`memo`에 `null`을 보내면 그 값을 삭제하고, 값을 보내면 교체한다. `sentence`/`scrapImageUrl`은 `null`을 허용하지 않는다.
+- 소속 `LibraryBook`이 논리 삭제되면 그 책에 속한 스크랩도 함께 논리 삭제된다(cascade) — 스크랩은 옮겨질 다른 곳이 없는 순수 하위 리소스이기 때문(Shelf 삭제 시 책을 기본 책장으로 옮기는 것과 다른 지점). DB 외래키 `ON DELETE CASCADE`가 아니라 애플리케이션이 같은 트랜잭션에서 명시적으로 처리한다(CLIAR-45 당시엔 DB cascade였으나 "논리 삭제" 절 참조 — 애플리케이션 오케스트레이션으로 변경).
 
-## Librarian / 동물 사서 카탈로그
+## Librarian aggregate (ADR-0011, ADR-0009 대체)
+
+`Librarian`은 더 이상 시스템이 관리하는 마스터 카탈로그가 아니라, 회원이 실제로 획득해 보유하는 인스턴스다. 타입별 공통 정보(이미지)만 별도 마스터 `LibrarianTypeInfo`로 분리되어 있다.
+
+### `LibrarianTypeInfo` (타입 마스터, 시스템이 관리)
+
+- `type`(고정 enum: `RUSSIAN_BLUE`/`SHOEBILL` — 종류가 늘어나면 계약도 함께 갱신), `imageUrl`(기본 이미지), `clickedImageUrl`(클릭 시 이미지)
+- 앱이 생성/수정하지 않고 Flyway 시드로만 채워진다. `getLibrarianTypes`로 조회한다.
+
+### `Librarian` (회원 소유 사서 인스턴스)
 
 소유하는 개념:
 
-- `Librarian`(사서 마스터 데이터, 시스템이 관리): `librarianId`, `name`, `type`(고양이/새/곰/달팽이 등 — 종류가 늘어날 수 있어 고정 enum이 아니라 서버가 관리하는 문자열), `imageUrl`, `evolutionStage`
+- 소유자 식별자 `memberId`(요청 body가 아니라 인증 principal에서 얻는다)
+- 서버 발급 식별자 `librarianId`
+- `type`(`LibrarianTypeInfo` 참조)
+- `name`(회원이 사서를 획득할 때 직접 짓는 이름 — 서버가 타입 마스터 이름을 복사해 채우지 않는다)
+- `level`(기본값 1), `experience`(기본값 0) — 레벨업·경험치 획득 로직 자체는 이 저장소 범위 밖이다. 현재는 값을 갖되 바꾸는 비즈니스 규칙이 없다(레벨 정책 테이블 `librarian_level`은 정책값만 준비된 상태, 아래 "미결정 도메인" 참조).
+- `isRepresentative`(그 회원의 대표 사서 여부)
+- 생성·수정 시각
 
-회원별 대표 사서 선택(과거 `memberId` → `librarianId` 매핑)은 이 서비스의 범위가 아니다 — Member 서비스가 소유한다(ADR-0009). Book Service는 사서 마스터 카탈로그 조회(`getLibrarians`)만 제공하며, 선택 자체나 "회원이 지금 어떤 사서를 대표로 뒀는지"는 알지 못한다.
+불변식:
 
-## 페이지와 진도율 (ADR-0005 반영)
+- 같은 회원은 같은 `type`을 최대 1마리만 보유할 수 있다 — 초과 획득 시도는 409(`LIBRARIAN_ALREADY_OWNED`).
+- 이름은 언제든 몇 번이든 바꿀 수 있다(`renameLibrarian`) — 등록 시 1회로 고정하지 않는다.
+- 회원당 대표 사서(`isRepresentative=true`)는 최대 1마리다. 다른 사서를 대표로 지정하면(`selectRepresentative`) 기존 대표는 자동으로 해제된다.
+- 대표 사서를 아직 지정하지 않았으면 `getRepresentative`는 404(`REPRESENTATIVE_LIBRARIAN_NOT_SELECTED`)다.
+- 사서 방출(`deleteLibrarian`)은 다른 aggregate와 동일하게 논리 삭제다.
+- 모든 조회와 변경은 aggregate 소유자(`memberId`) 기준으로 수행한다 — 다른 사용자의 사서에 접근하면 403(`LIBRARIAN_ACCESS_DENIED`).
 
-- `totalPages > 0`
-- `0 <= currentPage <= totalPages`
-- 진도율은 서버가 `currentPage / totalPages * 100`으로 계산한다.
-- 전체 페이지를 기존 현재 페이지보다 작게 줄일 수 없다.
+**대표 사서 선택의 소유권 변천:** CLIAR-46(최초 Book Service 구현) → ADR-0009(Member 서비스로 이관) → ADR-0011(다시 Book Service로 재통합, 이번). 이번엔 단순 "선택"이 아니라 레벨/경험치를 가진 회원 소유 게임 요소로 재정의되면서, 소유 관계와 대표 여부를 같은 서비스가 함께 관리하는 구조로 확정됐다.
+
+## 페이지와 진도율 (ADR-0005, ADR-0010 반영)
+
+- `totalPages`는 선택 값이다(ADR-0010) — 값이 있으면 `totalPages > 0`, `0 <= currentPage <= totalPages`를 지켜야 한다.
+- `totalPages`가 있으면 진도율은 서버가 `currentPage / totalPages * 100`으로 계산한다. `totalPages`가 없으면 `progress`는 `null`이다.
+- 전체 페이지를 기존 현재 페이지보다 작게 줄일 수 없다(값이 있을 때만 적용).
 - 이전 페이지로의 이동은 사용자의 위치 정정으로 허용한다.
-- `ReadingStatus`(`NOT_STARTED`/`READING`/`COMPLETED`)는 ADR-0005로 제거했다 — 진행 상태는 `progress`(진도율)만으로 표현하고, 별도 상태 필드나 필터는 두지 않는다.
+- `ReadingStatus`(`NOT_STARTED`/`READING`/`COMPLETED`)는 ADR-0005로 한 차례 제거했다가, ADR-0010으로 값 구성을 바꿔(`PLANNED`/`READING`/`COMPLETED`) 다시 도입했다 — `LibraryBook aggregate` 절 참조. `progress`로부터 자동 유도하지 않는 독립 필드라는 점은 그대로다.
 
 ## 중복 (ADR-0007 반영)
 
@@ -139,9 +169,23 @@
 - 기본 책장은 계정 생성 이벤트 없이 필요 시점에 서버가 자동 생성(get-or-create)한다. 삭제는 금지하지만 이름 변경은 허용한다.
 - 책장 이름 중복은 서버가 강제하지 않는다.
 
+## 결정된 사항 (ADR-0010 반영)
+
+- `genre`/`readingStatus`를 `LibraryBook`에 재도입했다 — `genre`는 ADR-0003이 제거했던 것의 부분 반전, `readingStatus`는 ADR-0005 전체의 반전(값 구성은 다름).
+- 두 필드 모두 `progress`와 자동 연동되지 않는 독립 필드다.
+- `totalPages`를 필수에서 선택 필드로 바꿨다 — 값이 없으면 `progress`도 `null`이다.
+
+## 결정된 사항 (ADR-0011 반영)
+
+- `Librarian`을 시스템 마스터 카탈로그에서 회원 소유 인스턴스(레벨/경험치/대표 여부)로 재정의했다. 타입별 공통 이미지는 신규 `LibrarianTypeInfo` 마스터로 분리했다.
+- 대표 사서 선택·조회를 Member 서비스(ADR-0009)에서 다시 Book Service로 재통합했다.
+- 사서 이름은 회원이 직접 짓고 언제든 바꿀 수 있다. 사서 방출(논리 삭제)을 CRUD 범위에 포함했다.
+- `evolutionStage` 개념은 새 모델에 없어 폐기했다.
+
 ## 미결정 도메인
 
 - 표지 색상(`coverColor`)의 생성 주체와 허용 값 — 저장 필드가 정의되면 별도로 다시 설계 (ADR-0002에서 관련 필터는 우선 제거)
 - 스크랩 목록 조회의 정렬 기준 — 현재는 서버가 `createdAt` 오름차순(등록 순)으로 고정하고 클라이언트가 선택할 수 있는 sortBy가 없음(CLIAR-45). 필요해지면 Library 목록과 같은 방식으로 sortBy 추가 검토
+- `librarian_level`의 레벨별 필요 경험치 정책 값 — 현재는 `level=1, requiredExperience=0` 최소 시드만 있고 나머지 레벨 값은 미정(`.harness/BACKLOG.md` 참조). 경험치 획득 트리거·레벨업 시점의 부수효과 자체도 아직 설계하지 않았다.
 
 결정된 규칙이 API에 노출되면 `docs/api/openapi.yaml`과 계약 테스트도 함께 갱신한다.

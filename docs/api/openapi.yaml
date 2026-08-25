@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Virtual Shelf Book Service API
-  version: 0.7.0
+  version: 0.8.0
   description: |
     Virtual Shelf MSA의 Book Service 계약이다.
     알라딘 API 기반 외부 도서 검색, 개인 서재 관리, 독서 진도, 문장 스크랩, 동물 사서를 제공한다.
@@ -31,7 +31,7 @@ tags:
   - name: Scrap
     description: 서재 도서에 연결된 문장 스크랩 관리
   - name: Librarian
-    description: 동물 사서 마스터 정보 조회. 회원별 대표 사서 선택은 Member 서비스가 소유한다(ADR-0009).
+    description: 동물 사서 타입 카탈로그 조회, 사서 획득·개명·방출, 대표 사서 지정/조회. Book Service가 소유한다(ADR-0011, ADR-0009 대체).
 
 paths:
   /api/v1/books/search:
@@ -122,6 +122,8 @@ paths:
                 shelfRank: "m"
                 title: 어린 왕자
                 author: 앙투안 드 생텍쥐페리
+                genre: NONE
+                readingStatus: PLANNED
                 currentPage: 0
                 progress: 0.0
         "400":
@@ -204,6 +206,8 @@ paths:
                     shelfRank: "m"
                     title: 살인자의 기억법
                     author: 김영하
+                    genre: MYSTERY_THRILLER
+                    readingStatus: READING
                     coverUrl: https://example.com/covers/9791198765432.jpg
                     progress: 45.0
                 page: 0
@@ -237,8 +241,10 @@ paths:
                 title: 어린 왕자
                 author: 앙투안 드 생텍쥐페리
                 isbn: "9788932917245"
+                genre: NONE
                 publisher: 열린책들
                 totalPages: 160
+                readingStatus: PLANNED
                 coverUrl: https://example.com/covers/9788932917245.jpg
                 currentPage: 50
                 progress: 31.25
@@ -254,8 +260,8 @@ paths:
       operationId: updateLibraryBook
       summary: 서재 책 정보 수정
       description: |
-        로그인 사용자의 서재에 등록된 도서 정보를 수정한다. 7개 필드를 항상 모두 포함해야 하며,
-        `isbn`/`publisher`/`publishedDate`/`coverUrl`에 `null`을 보내면 그 값을 삭제한다.
+        로그인 사용자의 서재에 등록된 도서 정보를 수정한다. 9개 필드를 항상 모두 포함해야 하며,
+        `isbn`/`publisher`/`publishedDate`/`coverUrl`/`totalPages`에 `null`을 보내면 그 값을 삭제한다.
       requestBody:
         required: true
         content:
@@ -281,6 +287,8 @@ paths:
                 bookId: 123
                 shelfRank: "m"
                 title: 어린 왕자
+                genre: NONE
+                readingStatus: PLANNED
                 totalPages: 158
                 updatedAt: "2026-08-17T01:10:00+09:00"
         "400":
@@ -393,7 +401,9 @@ paths:
       tags: [Reading Progress]
       operationId: updateReadingProgress
       summary: 독서 진도 수정
-      description: 현재/전체 페이지를 수정하고 진도율을 서버에서 계산한다.
+      description: |
+        현재/전체 페이지를 수정하고 진도율을 서버에서 계산한다. `totalPages`를 모르면 생략할 수 있고,
+        이 경우 `progress`는 null로 응답된다.
       requestBody:
         required: true
         content:
@@ -581,6 +591,8 @@ paths:
                     shelfRank: "m"
                     title: 살인자의 기억법
                     author: 김영하
+                    genre: MYSTERY_THRILLER
+                    readingStatus: READING
                     coverUrl: https://example.com/covers/9791198765432.jpg
                     progress: 45.0
                 page: 0
@@ -611,6 +623,7 @@ paths:
             example:
               sentence: 어른들은 누구나 처음엔 어린이였다.
               pageNumber: 12
+              scrapImageUrl: https://example.com/scraps/456.jpg
               memo: 이 문장이 계속 마음에 남는다.
       responses:
         "201":
@@ -624,6 +637,7 @@ paths:
                 bookId: 123
                 sentence: 어른들은 누구나 처음엔 어린이였다.
                 pageNumber: 12
+                scrapImageUrl: https://example.com/scraps/456.jpg
                 memo: 이 문장이 계속 마음에 남는다.
                 createdAt: "2026-08-20T10:00:00+09:00"
                 updatedAt: "2026-08-20T10:00:00+09:00"
@@ -673,6 +687,7 @@ paths:
                   - scrapId: 456
                     sentence: 어른들은 누구나 처음엔 어린이였다.
                     pageNumber: 12
+                    scrapImageUrl: https://example.com/scraps/456.jpg
                     createdAt: "2026-08-20T10:00:00+09:00"
                 page: 0
                 size: 20
@@ -705,6 +720,7 @@ paths:
                 bookId: 123
                 sentence: 어른들은 누구나 처음엔 어린이였다.
                 pageNumber: 12
+                scrapImageUrl: https://example.com/scraps/456.jpg
                 memo: 이 문장이 계속 마음에 남는다.
                 createdAt: "2026-08-20T10:00:00+09:00"
                 updatedAt: "2026-08-20T10:00:00+09:00"
@@ -720,10 +736,10 @@ paths:
       operationId: updateScrap
       summary: 스크랩 문장/페이지/메모 수정
       description: |
-        스크랩의 문장, 페이지 번호, 감상 및 메모를 수정한다.
-        `sentence`, `pageNumber`, `memo`는 항상 모두 포함해야 한다(생략 불가).
+        스크랩의 문장, 페이지 번호, 이미지, 감상 및 메모를 수정한다.
+        `sentence`, `pageNumber`, `scrapImageUrl`, `memo`는 항상 모두 포함해야 한다(생략 불가).
         `pageNumber`/`memo`에 `null`을 보내면 해당 값을 삭제하고, 값을 보내면 그 값으로 교체한다.
-        `sentence`는 `null`을 허용하지 않는다.
+        `sentence`/`scrapImageUrl`은 `null`을 허용하지 않는다.
       requestBody:
         required: true
         content:
@@ -733,6 +749,7 @@ paths:
             example:
               sentence: 어른들은 누구나 처음엔 어린이였다. 그것을 기억하는 어른은 별로 없지만.
               pageNumber: 12
+              scrapImageUrl: https://example.com/scraps/456.jpg
               memo: null
       responses:
         "200":
@@ -746,6 +763,7 @@ paths:
                 bookId: 123
                 sentence: 어른들은 누구나 처음엔 어린이였다. 그것을 기억하는 어른은 별로 없지만.
                 pageNumber: 12
+                scrapImageUrl: https://example.com/scraps/456.jpg
                 memo: null
                 createdAt: "2026-08-20T10:00:00+09:00"
                 updatedAt: "2026-08-20T10:20:00+09:00"
@@ -773,33 +791,196 @@ paths:
         "404":
           $ref: "#/components/responses/ScrapNotFound"
 
+  /api/v1/librarian-types:
+    get:
+      tags: [Librarian]
+      operationId: getLibrarianTypes
+      summary: 사서 타입 카탈로그 조회
+      description: 획득 가능한 동물 사서 타입(러시안블루, 슈빌)별 기본/클릭 시 이미지를 조회한다.
+      responses:
+        "200":
+          description: 사서 타입 카탈로그 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibrarianTypeListResponse"
+              example:
+                types:
+                  - type: RUSSIAN_BLUE
+                    imageUrl: https://example.com/librarians/cat-1.png
+                    clickedImageUrl: https://example.com/librarians/cat-1-clicked.png
+                  - type: SHOEBILL
+                    imageUrl: https://example.com/librarians/bird-1.png
+                    clickedImageUrl: https://example.com/librarians/bird-1-clicked.png
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /api/v1/librarians:
+    post:
+      tags: [Librarian]
+      operationId: acquireLibrarian
+      summary: 사서 획득
+      description: |
+        로그인 사용자가 지정한 타입의 사서를 새로 획득해 이름을 지어준다.
+        같은 타입의 사서는 회원당 최대 1마리만 보유할 수 있다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcquireLibrarianRequest"
+            example:
+              type: RUSSIAN_BLUE
+              name: 나비
+      responses:
+        "201":
+          description: 사서 획득 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcquireLibrarianResponse"
+              example:
+                librarianId: 10
+                type: RUSSIAN_BLUE
+                name: 나비
+                level: 1
+                experience: 0
+                isRepresentative: false
+                createdAt: "2026-08-25T10:00:00+09:00"
+        "400":
+          $ref: "#/components/responses/InvalidLibrarianData"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/LibrarianAlreadyOwned"
+
     get:
       tags: [Librarian]
       operationId: getLibrarians
-      summary: 동물 사서 마스터 목록 조회
-      description: 대표 사서로 선택 가능한 동물 사서(고양이, 새, 곰, 달팽이 등)의 기본 정보를 조회한다.
+      summary: 내가 보유한 사서 목록 조회
+      description: 로그인 사용자가 보유한 사서 전체를 조회한다.
       responses:
         "200":
-          description: 사서 마스터 목록 조회 성공
+          description: 보유 사서 목록 조회 성공
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/LibrarianListResponse"
               example:
                 librarians:
-                  - librarianId: 1
+                  - librarianId: 10
+                    type: RUSSIAN_BLUE
                     name: 나비
-                    type: CAT
-                    imageUrl: https://example.com/librarians/cat-1.png
-                    evolutionStage: 1
-                  - librarianId: 2
-                    name: 부엉
-                    type: BIRD
-                    imageUrl: https://example.com/librarians/bird-1.png
-                    evolutionStage: 1
+                    level: 1
+                    experience: 0
+                    isRepresentative: true
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/librarians/representative:
+    get:
+      tags: [Librarian]
+      operationId: getRepresentative
+      summary: 대표 사서 조회
+      description: 로그인 사용자가 지정한 대표 사서를 조회한다. 아직 지정하지 않았으면 404를 반환한다.
+      responses:
+        "200":
+          description: 대표 사서 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepresentativeLibrarianResponse"
+              example:
+                librarianId: 10
+                type: RUSSIAN_BLUE
+                name: 나비
+                level: 1
+                updatedAt: "2026-08-25T10:00:00+09:00"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/RepresentativeLibrarianNotSelected"
+
+  /api/v1/librarians/{librarianId}:
+    parameters:
+      - $ref: "#/components/parameters/LibrarianId"
+    patch:
+      tags: [Librarian]
+      operationId: renameLibrarian
+      summary: 사서 이름 변경
+      description: 로그인 사용자가 보유한 사서의 이름을 바꾼다. 언제든 몇 번이든 바꿀 수 있다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameLibrarianRequest"
+            example:
+              name: 루루
+      responses:
+        "200":
+          description: 사서 이름 변경 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenameLibrarianResponse"
+              example:
+                librarianId: 10
+                name: 루루
+                updatedAt: "2026-08-25T10:05:00+09:00"
+        "400":
+          $ref: "#/components/responses/InvalidLibrarianData"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/LibrarianAccessDenied"
+        "404":
+          $ref: "#/components/responses/LibrarianNotFound"
+
+    delete:
+      tags: [Librarian]
+      operationId: deleteLibrarian
+      summary: 사서 방출
+      description: 로그인 사용자가 보유한 사서를 방출(논리 삭제)한다.
+      responses:
+        "204":
+          description: 사서 방출 성공. 응답 body 없음
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/LibrarianAccessDenied"
+        "404":
+          $ref: "#/components/responses/LibrarianNotFound"
+
+  /api/v1/librarians/{librarianId}/representative:
+    parameters:
+      - $ref: "#/components/parameters/LibrarianId"
+    patch:
+      tags: [Librarian]
+      operationId: selectRepresentative
+      summary: 대표 사서 지정
+      description: |
+        로그인 사용자가 보유한 사서 중 하나를 대표 사서로 지정한다. 이미 다른 사서가 대표로 지정되어 있으면
+        그 사서는 자동으로 대표에서 해제된다. 회원당 대표 사서는 항상 최대 1마리다.
+      responses:
+        "200":
+          description: 대표 사서 지정 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepresentativeLibrarianResponse"
+              example:
+                librarianId: 10
+                type: RUSSIAN_BLUE
+                name: 나비
+                level: 1
+                updatedAt: "2026-08-25T10:10:00+09:00"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/LibrarianAccessDenied"
+        "404":
+          $ref: "#/components/responses/LibrarianNotFound"
 
 components:
   securitySchemes:
@@ -842,6 +1023,17 @@ components:
         format: int64
         minimum: 1
       example: 2
+
+    LibrarianId:
+      name: librarianId
+      in: path
+      required: true
+      description: 회원이 보유한 사서 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+      example: 10
 
   schemas:
     ErrorResponse:
@@ -903,10 +1095,40 @@ components:
           items:
             $ref: "#/components/schemas/ExternalBook"
 
+    Genre:
+      type: string
+      enum:
+        [
+          NONE,
+          SCIENCE_FICTION,
+          FANTASY,
+          ROMANCE,
+          MYSTERY_THRILLER,
+          LITERARY_FICTION,
+          ESSAY,
+          POETRY_DRAMA,
+          HUMANITIES,
+          HISTORY,
+          BUSINESS_ECONOMICS,
+          SELF_HELP,
+          SCIENCE,
+          ARTS,
+          RELIGION,
+          COMPUTER_IT,
+        ]
+      description: 도서 장르. 생략하면 NONE으로 저장된다.
+      default: NONE
+
+    ReadingStatus:
+      type: string
+      enum: [PLANNED, READING, COMPLETED]
+      description: 독서 상태. 생략하면 PLANNED로 저장된다. 진도율(progress)과 자동으로 연동되지 않는 별도 필드다.
+      default: PLANNED
+
     CreateLibraryBookRequest:
       type: object
       additionalProperties: false
-      required: [title, author, totalPages]
+      required: [title, author]
       properties:
         title:
           type: string
@@ -919,6 +1141,8 @@ components:
         isbn:
           type: string
           pattern: "^(?:[0-9]{10}|[0-9]{13})$"
+        genre:
+          $ref: "#/components/schemas/Genre"
         publisher:
           type: string
           maxLength: 100
@@ -929,9 +1153,12 @@ components:
           type: integer
           format: int32
           minimum: 1
+          description: 생략 가능. 알라딘 API가 제공하지 않는 도서가 많아 등록 시점에 모를 수 있다.
         coverUrl:
           type: string
           format: uri
+        readingStatus:
+          $ref: "#/components/schemas/ReadingStatus"
         shelfId:
           type: integer
           format: int64
@@ -951,7 +1178,7 @@ components:
     CreateLibraryBookResponse:
       type: object
       additionalProperties: false
-      required: [bookId, shelfId, shelfRank, title, author, currentPage, progress]
+      required: [bookId, shelfId, shelfRank, title, author, genre, readingStatus, currentPage, progress]
       properties:
         bookId:
           type: integer
@@ -967,20 +1194,25 @@ components:
           type: string
         author:
           type: string
+        genre:
+          $ref: "#/components/schemas/Genre"
+        readingStatus:
+          $ref: "#/components/schemas/ReadingStatus"
         currentPage:
           type: integer
           format: int32
           minimum: 0
         progress:
-          type: number
+          type: [number, "null"]
           format: double
           minimum: 0
           maximum: 100
+          description: totalPages를 모르면 null이다.
 
     LibraryBookSummary:
       type: object
       additionalProperties: false
-      required: [bookId, shelfId, shelfRank, title, author, progress]
+      required: [bookId, shelfId, shelfRank, title, author, genre, readingStatus, progress]
       properties:
         bookId:
           type: integer
@@ -996,14 +1228,19 @@ components:
           type: string
         author:
           type: string
+        genre:
+          $ref: "#/components/schemas/Genre"
+        readingStatus:
+          $ref: "#/components/schemas/ReadingStatus"
         coverUrl:
           type: string
           format: uri
         progress:
-          type: number
+          type: [number, "null"]
           format: double
           minimum: 0
           maximum: 100
+          description: totalPages를 모르면 null이다.
 
     LibraryBookPageResponse:
       type: object
@@ -1040,7 +1277,8 @@ components:
         - shelfRank
         - title
         - author
-        - totalPages
+        - genre
+        - readingStatus
         - currentPage
         - progress
       properties:
@@ -1061,29 +1299,34 @@ components:
         isbn:
           type: string
           pattern: "^(?:[0-9]{10}|[0-9]{13})$"
+        genre:
+          $ref: "#/components/schemas/Genre"
         publisher:
           type: string
         totalPages:
-          type: integer
+          type: [integer, "null"]
           format: int32
           minimum: 1
         coverUrl:
           type: string
           format: uri
+        readingStatus:
+          $ref: "#/components/schemas/ReadingStatus"
         currentPage:
           type: integer
           format: int32
           minimum: 0
         progress:
-          type: number
+          type: [number, "null"]
           format: double
           minimum: 0
           maximum: 100
+          description: totalPages를 모르면 null이다.
 
     UpdateLibraryBookRequest:
       type: object
       additionalProperties: false
-      required: [title, author, isbn, publisher, publishedDate, coverUrl, totalPages]
+      required: [title, author, isbn, genre, publisher, publishedDate, coverUrl, readingStatus, totalPages]
       properties:
         title:
           type: string
@@ -1096,6 +1339,8 @@ components:
         isbn:
           type: [string, "null"]
           pattern: "^(?:[0-9]{10}|[0-9]{13})$"
+        genre:
+          $ref: "#/components/schemas/Genre"
         publisher:
           type: [string, "null"]
           minLength: 1
@@ -1106,18 +1351,20 @@ components:
         coverUrl:
           type: [string, "null"]
           format: uri
+        readingStatus:
+          $ref: "#/components/schemas/ReadingStatus"
         totalPages:
-          type: integer
+          type: [integer, "null"]
           format: int32
           minimum: 1
       description: |
-        7개 필드를 항상 모두 포함해야 한다(부분 생략 불가). `isbn`/`publisher`/`publishedDate`/`coverUrl`는
-        `null`이면 그 값을 삭제하고, 값이 있으면 교체한다. `title`/`author`/`totalPages`는 `null`을 허용하지 않는다.
+        9개 필드를 항상 모두 포함해야 한다(부분 생략 불가). `isbn`/`publisher`/`publishedDate`/`coverUrl`/`totalPages`는
+        `null`이면 그 값을 삭제하고, 값이 있으면 교체한다. `title`/`author`/`genre`/`readingStatus`는 `null`을 허용하지 않는다.
 
     UpdateLibraryBookResponse:
       type: object
       additionalProperties: false
-      required: [bookId, shelfRank, title, totalPages, updatedAt]
+      required: [bookId, shelfRank, title, genre, readingStatus, updatedAt]
       properties:
         bookId:
           type: integer
@@ -1127,11 +1374,15 @@ components:
           $ref: "#/components/schemas/ShelfRank"
         title:
           type: string
+        genre:
+          $ref: "#/components/schemas/Genre"
         coverUrl:
           type: string
           format: uri
+        readingStatus:
+          $ref: "#/components/schemas/ReadingStatus"
         totalPages:
-          type: integer
+          type: [integer, "null"]
           format: int32
           minimum: 1
         updatedAt:
@@ -1288,22 +1539,23 @@ components:
     UpdateReadingProgressRequest:
       type: object
       additionalProperties: false
-      required: [currentPage, totalPages]
+      required: [currentPage]
       properties:
         currentPage:
           type: integer
           format: int32
           minimum: 0
         totalPages:
-          type: integer
+          type: [integer, "null"]
           format: int32
           minimum: 1
-      description: currentPage는 totalPages보다 클 수 없다.
+          description: 생략(null)하면 기존에 등록된 totalPages를 지운다. currentPage는 totalPages보다 클 수 없다.
+      description: totalPages를 생략하면 currentPage 범위 검증(0 이상)만 적용된다.
 
     UpdateReadingProgressResponse:
       type: object
       additionalProperties: false
-      required: [bookId, currentPage, totalPages, progress, updatedAt]
+      required: [bookId, currentPage, progress, updatedAt]
       properties:
         bookId:
           type: integer
@@ -1314,14 +1566,15 @@ components:
           format: int32
           minimum: 0
         totalPages:
-          type: integer
+          type: [integer, "null"]
           format: int32
           minimum: 1
         progress:
-          type: number
+          type: [number, "null"]
           format: double
           minimum: 0
           maximum: 100
+          description: totalPages를 모르면 null이다.
         updatedAt:
           type: string
           format: date-time
@@ -1329,7 +1582,7 @@ components:
     CreateScrapRequest:
       type: object
       additionalProperties: false
-      required: [sentence]
+      required: [sentence, scrapImageUrl]
       properties:
         sentence:
           type: string
@@ -1339,6 +1592,9 @@ components:
           type: integer
           format: int32
           minimum: 1
+        scrapImageUrl:
+          type: string
+          format: uri
         memo:
           type: string
           maxLength: 2000
@@ -1346,7 +1602,7 @@ components:
     UpdateScrapRequest:
       type: object
       additionalProperties: false
-      required: [sentence, pageNumber, memo]
+      required: [sentence, pageNumber, scrapImageUrl, memo]
       properties:
         sentence:
           type: string
@@ -1356,17 +1612,20 @@ components:
           type: [integer, "null"]
           format: int32
           minimum: 1
+        scrapImageUrl:
+          type: string
+          format: uri
         memo:
           type: [string, "null"]
           maxLength: 2000
       description: |
-        세 필드 모두 항상 포함해야 한다. pageNumber/memo는 null이면 삭제, 값이 있으면 교체한다.
-        sentence는 null을 허용하지 않는다.
+        네 필드 모두 항상 포함해야 한다. pageNumber/memo는 null이면 삭제, 값이 있으면 교체한다.
+        sentence/scrapImageUrl은 null을 허용하지 않는다.
 
     ScrapSummary:
       type: object
       additionalProperties: false
-      required: [scrapId, sentence, createdAt]
+      required: [scrapId, sentence, scrapImageUrl, createdAt]
       properties:
         scrapId:
           type: integer
@@ -1378,6 +1637,9 @@ components:
           type: integer
           format: int32
           minimum: 1
+        scrapImageUrl:
+          type: string
+          format: uri
         createdAt:
           type: string
           format: date-time
@@ -1411,7 +1673,7 @@ components:
     ScrapDetailResponse:
       type: object
       additionalProperties: false
-      required: [scrapId, bookId, sentence, createdAt, updatedAt]
+      required: [scrapId, bookId, sentence, scrapImageUrl, createdAt, updatedAt]
       properties:
         scrapId:
           type: integer
@@ -1427,6 +1689,9 @@ components:
           type: [integer, "null"]
           format: int32
           minimum: 1
+        scrapImageUrl:
+          type: string
+          format: uri
         memo:
           type: [string, "null"]
         createdAt:
@@ -1438,34 +1703,97 @@ components:
 
     LibrarianType:
       type: string
-      description: 사서 마스터 정보에 등록된 동물 종류. 새로운 종류가 추가될 수 있어 고정 enum 대신 서버가 관리하는 문자열이다.
-      minLength: 1
-      maxLength: 30
-      example: CAT
+      enum: [RUSSIAN_BLUE, SHOEBILL]
+      description: 획득 가능한 사서 종류. 타입 자체가 늘어나면 계약도 함께 갱신한다.
+      example: RUSSIAN_BLUE
 
-    LibrarianSummary:
+    LibrarianTypeSummary:
       type: object
       additionalProperties: false
-      required: [librarianId, name, type, imageUrl, evolutionStage]
+      required: [type, imageUrl, clickedImageUrl]
       properties:
-        librarianId:
-          type: integer
-          format: int64
-          minimum: 1
-        name:
-          type: string
-          minLength: 1
-          maxLength: 50
         type:
           $ref: "#/components/schemas/LibrarianType"
         imageUrl:
           type: string
           format: uri
-        evolutionStage:
+        clickedImageUrl:
+          type: string
+          format: uri
+
+    LibrarianTypeListResponse:
+      type: object
+      additionalProperties: false
+      required: [types]
+      properties:
+        types:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibrarianTypeSummary"
+
+    AcquireLibrarianRequest:
+      type: object
+      additionalProperties: false
+      required: [type, name]
+      properties:
+        type:
+          $ref: "#/components/schemas/LibrarianType"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+          description: 회원이 직접 짓는 사서 이름. 서버가 타입 이름을 복사해 채우지 않는다.
+
+    AcquireLibrarianResponse:
+      type: object
+      additionalProperties: false
+      required: [librarianId, type, name, level, experience, isRepresentative, createdAt]
+      properties:
+        librarianId:
+          type: integer
+          format: int64
+          minimum: 1
+        type:
+          $ref: "#/components/schemas/LibrarianType"
+        name:
+          type: string
+        level:
           type: integer
           format: int32
           minimum: 1
-          description: 사서 마스터 정보에 정의된 진화 단계 번호
+        experience:
+          type: integer
+          format: int64
+          minimum: 0
+        isRepresentative:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    LibrarianSummary:
+      type: object
+      additionalProperties: false
+      required: [librarianId, type, name, level, experience, isRepresentative]
+      properties:
+        librarianId:
+          type: integer
+          format: int64
+          minimum: 1
+        type:
+          $ref: "#/components/schemas/LibrarianType"
+        name:
+          type: string
+        level:
+          type: integer
+          format: int32
+          minimum: 1
+        experience:
+          type: integer
+          format: int64
+          minimum: 0
+        isRepresentative:
+          type: boolean
 
     LibrarianListResponse:
       type: object
@@ -1476,6 +1804,52 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LibrarianSummary"
+
+    RenameLibrarianRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 50
+
+    RenameLibrarianResponse:
+      type: object
+      additionalProperties: false
+      required: [librarianId, name, updatedAt]
+      properties:
+        librarianId:
+          type: integer
+          format: int64
+          minimum: 1
+        name:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+
+    RepresentativeLibrarianResponse:
+      type: object
+      additionalProperties: false
+      required: [librarianId, type, name, level, updatedAt]
+      properties:
+        librarianId:
+          type: integer
+          format: int64
+          minimum: 1
+        type:
+          $ref: "#/components/schemas/LibrarianType"
+        name:
+          type: string
+        level:
+          type: integer
+          format: int32
+          minimum: 1
+        updatedAt:
+          type: string
+          format: date-time
 
   responses:
     Unauthorized:
@@ -1767,3 +2141,53 @@ components:
           example:
             code: SCRAP_NOT_FOUND
             message: 스크랩을 찾을 수 없습니다.
+
+    InvalidLibrarianData:
+      description: 올바르지 않은 사서 정보(이름 공백 등)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: INVALID_LIBRARIAN_DATA
+            message: 올바르지 않은 사서 정보입니다.
+
+    LibrarianAlreadyOwned:
+      description: 같은 타입의 사서를 이미 보유함
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARIAN_ALREADY_OWNED
+            message: 이미 해당 타입의 사서를 보유하고 있습니다.
+
+    LibrarianAccessDenied:
+      description: 사서 접근 권한 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARIAN_ACCESS_DENIED
+            message: 해당 사서에 접근할 권한이 없습니다.
+
+    LibrarianNotFound:
+      description: 사서 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: LIBRARIAN_NOT_FOUND
+            message: 사서를 찾을 수 없습니다.
+
+    RepresentativeLibrarianNotSelected:
+      description: 대표 사서를 아직 선택하지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: REPRESENTATIVE_LIBRARIAN_NOT_SELECTED
+            message: 대표 사서를 아직 선택하지 않았습니다.

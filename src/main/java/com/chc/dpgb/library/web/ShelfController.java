@@ -1,6 +1,7 @@
 package com.chc.dpgb.library.web;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
@@ -49,14 +50,14 @@ public class ShelfController {
     public CreateShelfResponse createShelf(
             @AuthenticationPrincipal Jwt jwt, @RequestBody CreateShelfRequest request
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         Shelf shelf = shelfService.createShelf(memberId, request.name());
         return CreateShelfResponse.from(shelf);
     }
 
     @GetMapping
     public ShelfListResponse getShelves(@AuthenticationPrincipal Jwt jwt) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         List<Shelf> shelves = shelfService.getShelves(memberId);
         List<ShelfSummary> summaries = shelves.stream()
                 .map(shelf -> ShelfSummary.of(shelf, shelfService.bookCount(shelf.getShelfId())))
@@ -69,7 +70,7 @@ public class ShelfController {
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long shelfId,
             @RequestBody UpdateShelfRequest request
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         Shelf shelf = shelfService.updateShelf(memberId, shelfId, request.name());
         return UpdateShelfResponse.from(shelf);
     }
@@ -77,7 +78,7 @@ public class ShelfController {
     @DeleteMapping("/{shelfId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteShelf(@AuthenticationPrincipal Jwt jwt, @PathVariable Long shelfId) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         shelfService.deleteShelf(memberId, shelfId);
     }
 
@@ -87,7 +88,7 @@ public class ShelfController {
             @RequestParam(required = false, defaultValue = "0") int page,
             @RequestParam(required = false, defaultValue = "20") int size
     ) {
-        String memberId = MemberIdResolver.resolve(jwt);
+        UUID memberId = MemberIdResolver.resolve(jwt);
         shelfService.getOwnedShelf(memberId, shelfId);
         LibraryBookController.validatePaging(page, size);
         Page<LibraryBook> result = libraryBookService.getLibraryBooks(

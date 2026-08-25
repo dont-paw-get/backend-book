@@ -1,5 +1,6 @@
 package com.chc.dpgb.library.application;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -11,9 +12,9 @@ public interface ScrapRepository {
 
     Scrap save(Scrap scrap);
 
-    void delete(Scrap scrap);
-
     Optional<Scrap> findById(Long scrapId);
 
     Page<Scrap> findPageByBookId(Long bookId, Pageable pageable);
+
+    List<Scrap> findAllByBookId(Long bookId);
 }

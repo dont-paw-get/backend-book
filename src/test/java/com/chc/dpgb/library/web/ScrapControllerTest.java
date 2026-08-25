@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +42,9 @@ import com.chc.dpgb.security.SecurityConfig;
 @Import({SecurityConfig.class, GlobalExceptionHandler.class, ScrapController.class})
 class ScrapControllerTest {
 
+    private static final UUID MEMBER_1 = UUID.randomUUID();
+    private static final String IMAGE_URL = "https://example.com/scrap.png";
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -51,19 +55,20 @@ class ScrapControllerTest {
     private ScrapService scrapService;
 
     private static RequestPostProcessor member1Jwt() {
-        return jwt().jwt(builder -> builder.subject("member-1"));
+        return jwt().jwt(builder -> builder.subject(MEMBER_1.toString()));
     }
 
     @Test
     void createScrap은_201과_생성된_스크랩을_반환한다() throws Exception {
-        when(scrapService.createScrap("member-1", 1L, "어른들은 누구나 처음엔 어린이였다.", 12, "마음에 남는 문장"))
-                .thenReturn(Scrap.create(1L, "어른들은 누구나 처음엔 어린이였다.", 12, "마음에 남는 문장"));
+        when(scrapService.createScrap(MEMBER_1, 1L, "어른들은 누구나 처음엔 어린이였다.", 12, IMAGE_URL, "마음에 남는 문장"))
+                .thenReturn(Scrap.create(1L, "어른들은 누구나 처음엔 어린이였다.", 12, IMAGE_URL, "마음에 남는 문장"));
 
         mockMvc.perform(post("/api/v1/library/books/1/scraps")
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"sentence":"어른들은 누구나 처음엔 어린이였다.","pageNumber":12,"memo":"마음에 남는 문장"}
+                                {"sentence":"어른들은 누구나 처음엔 어린이였다.","pageNumber":12,
+                                 "scrapImageUrl":"https://example.com/scrap.png","memo":"마음에 남는 문장"}
                                 """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.bookId").value(1))
@@ -73,14 +78,15 @@ class ScrapControllerTest {
 
     @Test
     void createScrap은_sentence가_비어있으면_400() throws Exception {
-        when(scrapService.createScrap("member-1", 1L, "", 12, "마음에 남는 문장"))
+        when(scrapService.createScrap(MEMBER_1, 1L, "", 12, IMAGE_URL, "마음에 남는 문장"))
                 .thenThrow(new InvalidScrapDataException("sentence는 비어 있을 수 없습니다."));
 
         mockMvc.perform(post("/api/v1/library/books/1/scraps")
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"sentence":"","pageNumber":12,"memo":"마음에 남는 문장"}
+                                {"sentence":"","pageNumber":12,
+                                 "scrapImageUrl":"https://example.com/scrap.png","memo":"마음에 남는 문장"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_SCRAP_DATA"));
@@ -88,14 +94,15 @@ class ScrapControllerTest {
 
     @Test
     void createScrap은_책에_대한_권한이_없으면_403() throws Exception {
-        when(scrapService.createScrap("member-1", 1L, "어른들은 누구나 처음엔 어린이였다.", 12, "마음에 남는 문장"))
+        when(scrapService.createScrap(MEMBER_1, 1L, "어른들은 누구나 처음엔 어린이였다.", 12, IMAGE_URL, "마음에 남는 문장"))
                 .thenThrow(new LibraryBookAccessDeniedException());
 
         mockMvc.perform(post("/api/v1/library/books/1/scraps")
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"sentence":"어른들은 누구나 처음엔 어린이였다.","pageNumber":12,"memo":"마음에 남는 문장"}
+                                {"sentence":"어른들은 누구나 처음엔 어린이였다.","pageNumber":12,
+                                 "scrapImageUrl":"https://example.com/scrap.png","memo":"마음에 남는 문장"}
                                 """))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("LIBRARY_BOOK_ACCESS_DENIED"));
@@ -103,14 +110,15 @@ class ScrapControllerTest {
 
     @Test
     void createScrap은_책이_존재하지_않으면_404() throws Exception {
-        when(scrapService.createScrap("member-1", 1L, "어른들은 누구나 처음엔 어린이였다.", 12, "마음에 남는 문장"))
+        when(scrapService.createScrap(MEMBER_1, 1L, "어른들은 누구나 처음엔 어린이였다.", 12, IMAGE_URL, "마음에 남는 문장"))
                 .thenThrow(new LibraryBookNotFoundException());
 
         mockMvc.perform(post("/api/v1/library/books/1/scraps")
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"sentence":"어른들은 누구나 처음엔 어린이였다.","pageNumber":12,"memo":"마음에 남는 문장"}
+                                {"sentence":"어른들은 누구나 처음엔 어린이였다.","pageNumber":12,
+                                 "scrapImageUrl":"https://example.com/scrap.png","memo":"마음에 남는 문장"}
                                 """))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("LIBRARY_BOOK_NOT_FOUND"));
@@ -118,9 +126,9 @@ class ScrapControllerTest {
 
     @Test
     void getScraps는_책별_스크랩_목록을_반환한다() throws Exception {
-        Scrap scrap = Scrap.create(1L, "문장", 12, null);
+        Scrap scrap = Scrap.create(1L, "문장", 12, IMAGE_URL, null);
         Page<Scrap> page = new PageImpl<>(List.of(scrap), PageRequest.of(0, 20), 1);
-        when(scrapService.getScraps("member-1", 1L, 0, 20)).thenReturn(page);
+        when(scrapService.getScraps(MEMBER_1, 1L, 0, 20)).thenReturn(page);
 
         mockMvc.perform(get("/api/v1/library/books/1/scraps").with(member1Jwt()))
                 .andExpect(status().isOk())
@@ -130,7 +138,7 @@ class ScrapControllerTest {
 
     @Test
     void getScraps는_책에_대한_권한이_없으면_403() throws Exception {
-        when(scrapService.getScraps("member-1", 1L, 0, 20)).thenThrow(new LibraryBookAccessDeniedException());
+        when(scrapService.getScraps(MEMBER_1, 1L, 0, 20)).thenThrow(new LibraryBookAccessDeniedException());
 
         mockMvc.perform(get("/api/v1/library/books/1/scraps").with(member1Jwt()))
                 .andExpect(status().isForbidden())
@@ -139,7 +147,7 @@ class ScrapControllerTest {
 
     @Test
     void getScraps는_책이_존재하지_않으면_404() throws Exception {
-        when(scrapService.getScraps("member-1", 1L, 0, 20)).thenThrow(new LibraryBookNotFoundException());
+        when(scrapService.getScraps(MEMBER_1, 1L, 0, 20)).thenThrow(new LibraryBookNotFoundException());
 
         mockMvc.perform(get("/api/v1/library/books/1/scraps").with(member1Jwt()))
                 .andExpect(status().isNotFound())
@@ -148,8 +156,8 @@ class ScrapControllerTest {
 
     @Test
     void getScrap은_스크랩_상세를_반환한다() throws Exception {
-        when(scrapService.getScrap("member-1", 456L))
-                .thenReturn(Scrap.create(1L, "문장", 12, "메모"));
+        when(scrapService.getScrap(MEMBER_1, 456L))
+                .thenReturn(Scrap.create(1L, "문장", 12, IMAGE_URL, "메모"));
 
         mockMvc.perform(get("/api/v1/library/scraps/456").with(member1Jwt()))
                 .andExpect(status().isOk())
@@ -159,7 +167,7 @@ class ScrapControllerTest {
 
     @Test
     void getScrap은_권한이_없으면_403() throws Exception {
-        when(scrapService.getScrap("member-1", 456L)).thenThrow(new ScrapAccessDeniedException());
+        when(scrapService.getScrap(MEMBER_1, 456L)).thenThrow(new ScrapAccessDeniedException());
 
         mockMvc.perform(get("/api/v1/library/scraps/456").with(member1Jwt()))
                 .andExpect(status().isForbidden())
@@ -168,7 +176,7 @@ class ScrapControllerTest {
 
     @Test
     void getScrap은_존재하지_않으면_404() throws Exception {
-        when(scrapService.getScrap("member-1", 456L)).thenThrow(new ScrapNotFoundException());
+        when(scrapService.getScrap(MEMBER_1, 456L)).thenThrow(new ScrapNotFoundException());
 
         mockMvc.perform(get("/api/v1/library/scraps/456").with(member1Jwt()))
                 .andExpect(status().isNotFound())
@@ -177,14 +185,15 @@ class ScrapControllerTest {
 
     @Test
     void updateScrap은_수정된_스크랩을_반환한다() throws Exception {
-        when(scrapService.updateScrap(eq("member-1"), eq(456L), eq("새 문장"), eq(12), isNull()))
-                .thenReturn(Scrap.create(1L, "새 문장", 12, null));
+        when(scrapService.updateScrap(eq(MEMBER_1), eq(456L), eq("새 문장"), eq(12), eq(IMAGE_URL), isNull()))
+                .thenReturn(Scrap.create(1L, "새 문장", 12, IMAGE_URL, null));
 
         mockMvc.perform(patch("/api/v1/library/scraps/456")
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"sentence":"새 문장","pageNumber":12,"memo":null}
+                                {"sentence":"새 문장","pageNumber":12,
+                                 "scrapImageUrl":"https://example.com/scrap.png","memo":null}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sentence").value("새 문장"));
@@ -192,14 +201,15 @@ class ScrapControllerTest {
 
     @Test
     void updateScrap은_sentence가_비어있으면_400() throws Exception {
-        when(scrapService.updateScrap(eq("member-1"), eq(456L), eq(""), eq(12), isNull()))
+        when(scrapService.updateScrap(eq(MEMBER_1), eq(456L), eq(""), eq(12), eq(IMAGE_URL), isNull()))
                 .thenThrow(new InvalidScrapDataException("sentence는 비어 있을 수 없습니다."));
 
         mockMvc.perform(patch("/api/v1/library/scraps/456")
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"sentence":"","pageNumber":12,"memo":null}
+                                {"sentence":"","pageNumber":12,
+                                 "scrapImageUrl":"https://example.com/scrap.png","memo":null}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_SCRAP_DATA"));
@@ -207,14 +217,15 @@ class ScrapControllerTest {
 
     @Test
     void updateScrap은_권한이_없으면_403() throws Exception {
-        when(scrapService.updateScrap(eq("member-1"), eq(456L), eq("새 문장"), eq(12), isNull()))
+        when(scrapService.updateScrap(eq(MEMBER_1), eq(456L), eq("새 문장"), eq(12), eq(IMAGE_URL), isNull()))
                 .thenThrow(new ScrapAccessDeniedException());
 
         mockMvc.perform(patch("/api/v1/library/scraps/456")
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"sentence":"새 문장","pageNumber":12,"memo":null}
+                                {"sentence":"새 문장","pageNumber":12,
+                                 "scrapImageUrl":"https://example.com/scrap.png","memo":null}
                                 """))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("SCRAP_ACCESS_DENIED"));
@@ -222,14 +233,15 @@ class ScrapControllerTest {
 
     @Test
     void updateScrap은_존재하지_않으면_404() throws Exception {
-        when(scrapService.updateScrap(eq("member-1"), eq(456L), eq("새 문장"), eq(12), isNull()))
+        when(scrapService.updateScrap(eq(MEMBER_1), eq(456L), eq("새 문장"), eq(12), eq(IMAGE_URL), isNull()))
                 .thenThrow(new ScrapNotFoundException());
 
         mockMvc.perform(patch("/api/v1/library/scraps/456")
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"sentence":"새 문장","pageNumber":12,"memo":null}
+                                {"sentence":"새 문장","pageNumber":12,
+                                 "scrapImageUrl":"https://example.com/scrap.png","memo":null}
                                 """))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("SCRAP_NOT_FOUND"));
@@ -243,7 +255,7 @@ class ScrapControllerTest {
 
     @Test
     void deleteScrap은_권한이_없으면_403() throws Exception {
-        doThrow(new ScrapAccessDeniedException()).when(scrapService).deleteScrap("member-1", 456L);
+        doThrow(new ScrapAccessDeniedException()).when(scrapService).deleteScrap(MEMBER_1, 456L);
 
         mockMvc.perform(delete("/api/v1/library/scraps/456").with(member1Jwt()))
                 .andExpect(status().isForbidden())
@@ -252,7 +264,7 @@ class ScrapControllerTest {
 
     @Test
     void deleteScrap은_존재하지_않으면_404() throws Exception {
-        doThrow(new ScrapNotFoundException()).when(scrapService).deleteScrap("member-1", 456L);
+        doThrow(new ScrapNotFoundException()).when(scrapService).deleteScrap(MEMBER_1, 456L);
 
         mockMvc.perform(delete("/api/v1/library/scraps/456").with(member1Jwt()))
                 .andExpect(status().isNotFound())

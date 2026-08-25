@@ -1,7 +1,6 @@
 package com.chc.dpgb.library.web;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
@@ -15,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.LocalDate;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +44,8 @@ import com.chc.dpgb.security.SecurityConfig;
 @Import({SecurityConfig.class, GlobalExceptionHandler.class, LibraryBookController.class})
 class LibraryBookControllerTest {
 
+    private static final UUID MEMBER_1 = UUID.randomUUID();
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -54,13 +56,13 @@ class LibraryBookControllerTest {
     private LibraryBookService libraryBookService;
 
     private static org.springframework.test.web.servlet.request.RequestPostProcessor member1Jwt() {
-        return jwt().jwt(builder -> builder.subject("member-1"));
+        return jwt().jwt(builder -> builder.subject(MEMBER_1.toString()));
     }
 
     private static LibraryBook book(Long shelfId, String shelfRank) {
         LibraryBook book = LibraryBook.register(
-                "member-1", shelfId, shelfRank, "어린 왕자", "생텍쥐페리", "9788932917245", "열린책들",
-                LocalDate.of(2015, 10, 20), "https://example.com/cover.jpg", 160
+                MEMBER_1, shelfId, shelfRank, "어린 왕자", "생텍쥐페리", "9788932917245", null, "열린책들",
+                LocalDate.of(2015, 10, 20), "https://example.com/cover.jpg", null, 160
         );
         try {
             var field = LibraryBook.class.getDeclaredField("bookId");
@@ -75,7 +77,7 @@ class LibraryBookControllerTest {
     @Test
     void createLibraryBook은_201과_등록된_책을_반환한다() throws Exception {
         when(libraryBookService.createLibraryBook(
-                eq("member-1"), isNull(), any(), any(), any(), any(), any(), any(), anyInt()
+                eq(MEMBER_1), isNull(), any(), any(), any(), any(), any(), any(), any(), any(), any()
         )).thenReturn(book(1L, "m"));
 
         mockMvc.perform(post("/api/v1/library/books")
@@ -90,21 +92,24 @@ class LibraryBookControllerTest {
     }
 
     @Test
-    void createLibraryBook은_totalPages가_없으면_400() throws Exception {
+    void createLibraryBook은_totalPages를_생략해도_등록된다() throws Exception {
+        when(libraryBookService.createLibraryBook(
+                eq(MEMBER_1), isNull(), any(), any(), any(), any(), any(), any(), any(), any(), isNull()
+        )).thenReturn(book(1L, "m"));
+
         mockMvc.perform(post("/api/v1/library/books")
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"title":"어린 왕자","author":"앙투안 드 생텍쥐페리"}
                                 """))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("INVALID_BOOK_DATA"));
+                .andExpect(status().isCreated());
     }
 
     @Test
     void createLibraryBook은_이미_등록된_ISBN이면_409() throws Exception {
         when(libraryBookService.createLibraryBook(
-                eq("member-1"), isNull(), any(), any(), any(), any(), any(), any(), anyInt()
+                eq(MEMBER_1), isNull(), any(), any(), any(), any(), any(), any(), any(), any(), any()
         )).thenThrow(new BookAlreadyRegisteredException());
 
         mockMvc.perform(post("/api/v1/library/books")
@@ -122,7 +127,7 @@ class LibraryBookControllerTest {
         Page<LibraryBook> page =
                 new PageImpl<>(java.util.List.of(book(1L, "m")), PageRequest.of(0, 20), 1);
         when(libraryBookService.getLibraryBooks(
-                eq("member-1"), isNull(), isNull(), eq(LibrarySortBy.SHELF_ORDER), eq(Sort.Direction.ASC),
+                eq(MEMBER_1), isNull(), isNull(), eq(LibrarySortBy.SHELF_ORDER), eq(Sort.Direction.ASC),
                 eq(0), eq(20)
         )).thenReturn(page);
 
@@ -148,7 +153,7 @@ class LibraryBookControllerTest {
 
     @Test
     void getLibraryBook은_상세_정보를_반환한다() throws Exception {
-        when(libraryBookService.getLibraryBook("member-1", 123L)).thenReturn(book(1L, "m"));
+        when(libraryBookService.getLibraryBook(MEMBER_1, 123L)).thenReturn(book(1L, "m"));
 
         mockMvc.perform(get("/api/v1/library/books/123").with(member1Jwt()))
                 .andExpect(status().isOk())
@@ -157,7 +162,7 @@ class LibraryBookControllerTest {
 
     @Test
     void getLibraryBook은_권한이_없으면_403() throws Exception {
-        when(libraryBookService.getLibraryBook("member-1", 123L))
+        when(libraryBookService.getLibraryBook(MEMBER_1, 123L))
                 .thenThrow(new LibraryBookAccessDeniedException());
 
         mockMvc.perform(get("/api/v1/library/books/123").with(member1Jwt()))
@@ -167,7 +172,7 @@ class LibraryBookControllerTest {
 
     @Test
     void getLibraryBook은_존재하지_않으면_404() throws Exception {
-        when(libraryBookService.getLibraryBook("member-1", 123L))
+        when(libraryBookService.getLibraryBook(MEMBER_1, 123L))
                 .thenThrow(new LibraryBookNotFoundException());
 
         mockMvc.perform(get("/api/v1/library/books/123").with(member1Jwt()))
@@ -178,7 +183,7 @@ class LibraryBookControllerTest {
     @Test
     void updateLibraryBook은_수정된_책을_반환한다() throws Exception {
         when(libraryBookService.updateLibraryBook(
-                eq("member-1"), eq(123L), any(), any(), any(), any(), any(), any(), anyInt()
+                eq(MEMBER_1), eq(123L), any(), any(), any(), any(), any(), any(), any(), any(), any()
         )).thenReturn(book(1L, "m"));
 
         mockMvc.perform(patch("/api/v1/library/books/123")
@@ -195,7 +200,7 @@ class LibraryBookControllerTest {
     @Test
     void updateLibraryBook은_title이_비어있으면_400() throws Exception {
         when(libraryBookService.updateLibraryBook(
-                eq("member-1"), eq(123L), any(), any(), any(), any(), any(), any(), anyInt()
+                eq(MEMBER_1), eq(123L), any(), any(), any(), any(), any(), any(), any(), any(), any()
         )).thenThrow(new InvalidBookDataException("title은 비어 있을 수 없습니다."));
 
         mockMvc.perform(patch("/api/v1/library/books/123")
@@ -212,7 +217,7 @@ class LibraryBookControllerTest {
     @Test
     void updateLibraryBook은_권한이_없으면_403() throws Exception {
         when(libraryBookService.updateLibraryBook(
-                eq("member-1"), eq(123L), any(), any(), any(), any(), any(), any(), anyInt()
+                eq(MEMBER_1), eq(123L), any(), any(), any(), any(), any(), any(), any(), any(), any()
         )).thenThrow(new LibraryBookAccessDeniedException());
 
         mockMvc.perform(patch("/api/v1/library/books/123")
@@ -229,7 +234,7 @@ class LibraryBookControllerTest {
     @Test
     void updateLibraryBook은_존재하지_않으면_404() throws Exception {
         when(libraryBookService.updateLibraryBook(
-                eq("member-1"), eq(123L), any(), any(), any(), any(), any(), any(), anyInt()
+                eq(MEMBER_1), eq(123L), any(), any(), any(), any(), any(), any(), any(), any(), any()
         )).thenThrow(new LibraryBookNotFoundException());
 
         mockMvc.perform(patch("/api/v1/library/books/123")
@@ -252,7 +257,7 @@ class LibraryBookControllerTest {
     @Test
     void deleteLibraryBook은_권한이_없으면_403() throws Exception {
         doThrow(new LibraryBookAccessDeniedException())
-                .when(libraryBookService).deleteLibraryBook("member-1", 123L);
+                .when(libraryBookService).deleteLibraryBook(MEMBER_1, 123L);
 
         mockMvc.perform(delete("/api/v1/library/books/123").with(member1Jwt()))
                 .andExpect(status().isForbidden())
@@ -262,7 +267,7 @@ class LibraryBookControllerTest {
     @Test
     void deleteLibraryBook은_존재하지_않으면_404() throws Exception {
         doThrow(new LibraryBookNotFoundException())
-                .when(libraryBookService).deleteLibraryBook("member-1", 123L);
+                .when(libraryBookService).deleteLibraryBook(MEMBER_1, 123L);
 
         mockMvc.perform(delete("/api/v1/library/books/123").with(member1Jwt()))
                 .andExpect(status().isNotFound())
@@ -272,7 +277,7 @@ class LibraryBookControllerTest {
     @Test
     void reorderLibraryBook은_변경된_shelfRank를_반환한다() throws Exception {
         LibraryBook reordered = book(1L, "mV");
-        when(libraryBookService.reorderLibraryBook("member-1", 123L, null, 456L)).thenReturn(reordered);
+        when(libraryBookService.reorderLibraryBook(MEMBER_1, 123L, null, 456L)).thenReturn(reordered);
 
         mockMvc.perform(patch("/api/v1/library/books/123/order")
                         .with(member1Jwt())
@@ -286,7 +291,7 @@ class LibraryBookControllerTest {
 
     @Test
     void reorderLibraryBook은_이웃이_다른_책장이면_400() throws Exception {
-        when(libraryBookService.reorderLibraryBook("member-1", 123L, null, 456L))
+        when(libraryBookService.reorderLibraryBook(MEMBER_1, 123L, null, 456L))
                 .thenThrow(new InvalidReorderTargetException());
 
         mockMvc.perform(patch("/api/v1/library/books/123/order")
@@ -301,7 +306,7 @@ class LibraryBookControllerTest {
 
     @Test
     void reorderLibraryBook은_권한이_없으면_403() throws Exception {
-        when(libraryBookService.reorderLibraryBook("member-1", 123L, null, 456L))
+        when(libraryBookService.reorderLibraryBook(MEMBER_1, 123L, null, 456L))
                 .thenThrow(new LibraryBookAccessDeniedException());
 
         mockMvc.perform(patch("/api/v1/library/books/123/order")
@@ -316,7 +321,7 @@ class LibraryBookControllerTest {
 
     @Test
     void reorderLibraryBook은_존재하지_않으면_404() throws Exception {
-        when(libraryBookService.reorderLibraryBook("member-1", 123L, null, 456L))
+        when(libraryBookService.reorderLibraryBook(MEMBER_1, 123L, null, 456L))
                 .thenThrow(new LibraryBookNotFoundException());
 
         mockMvc.perform(patch("/api/v1/library/books/123/order")
@@ -341,7 +346,7 @@ class LibraryBookControllerTest {
 
     @Test
     void moveLibraryBookToShelf는_이동된_책장을_반환한다() throws Exception {
-        when(libraryBookService.moveLibraryBookToShelf("member-1", 123L, 2L)).thenReturn(book(2L, "m"));
+        when(libraryBookService.moveLibraryBookToShelf(MEMBER_1, 123L, 2L)).thenReturn(book(2L, "m"));
 
         mockMvc.perform(patch("/api/v1/library/books/123/shelf")
                         .with(member1Jwt())
@@ -355,7 +360,7 @@ class LibraryBookControllerTest {
 
     @Test
     void moveLibraryBookToShelf는_권한이_없으면_403() throws Exception {
-        when(libraryBookService.moveLibraryBookToShelf("member-1", 123L, 2L))
+        when(libraryBookService.moveLibraryBookToShelf(MEMBER_1, 123L, 2L))
                 .thenThrow(new LibraryBookAccessDeniedException());
 
         mockMvc.perform(patch("/api/v1/library/books/123/shelf")
@@ -370,7 +375,7 @@ class LibraryBookControllerTest {
 
     @Test
     void moveLibraryBookToShelf는_존재하지_않으면_404() throws Exception {
-        when(libraryBookService.moveLibraryBookToShelf("member-1", 123L, 2L))
+        when(libraryBookService.moveLibraryBookToShelf(MEMBER_1, 123L, 2L))
                 .thenThrow(new LibraryBookNotFoundException());
 
         mockMvc.perform(patch("/api/v1/library/books/123/shelf")
@@ -384,7 +389,7 @@ class LibraryBookControllerTest {
     }
 
     @Test
-    void updateReadingProgress는_필드가_없으면_400() throws Exception {
+    void updateReadingProgress는_currentPage가_없으면_400() throws Exception {
         mockMvc.perform(patch("/api/v1/library/books/123/progress")
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -397,7 +402,7 @@ class LibraryBookControllerTest {
     void updateReadingProgress는_갱신된_진도율을_반환한다() throws Exception {
         LibraryBook progressed = book(1L, "m");
         progressed.updateProgress(80, 160);
-        when(libraryBookService.updateReadingProgress("member-1", 123L, 80, 160)).thenReturn(progressed);
+        when(libraryBookService.updateReadingProgress(MEMBER_1, 123L, 80, 160)).thenReturn(progressed);
 
         mockMvc.perform(patch("/api/v1/library/books/123/progress")
                         .with(member1Jwt())
@@ -411,7 +416,7 @@ class LibraryBookControllerTest {
 
     @Test
     void updateReadingProgress는_권한이_없으면_403() throws Exception {
-        when(libraryBookService.updateReadingProgress("member-1", 123L, 80, 160))
+        when(libraryBookService.updateReadingProgress(MEMBER_1, 123L, 80, 160))
                 .thenThrow(new LibraryBookAccessDeniedException());
 
         mockMvc.perform(patch("/api/v1/library/books/123/progress")
@@ -426,7 +431,7 @@ class LibraryBookControllerTest {
 
     @Test
     void updateReadingProgress는_존재하지_않으면_404() throws Exception {
-        when(libraryBookService.updateReadingProgress("member-1", 123L, 80, 160))
+        when(libraryBookService.updateReadingProgress(MEMBER_1, 123L, 80, 160))
                 .thenThrow(new LibraryBookNotFoundException());
 
         mockMvc.perform(patch("/api/v1/library/books/123/progress")

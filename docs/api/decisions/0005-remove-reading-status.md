@@ -19,3 +19,7 @@
 - `.harness/DOMAIN.md`의 LibraryBook aggregate 소유 개념에서 `ReadingStatus`를 제거하고 "페이지와 독서 상태" 절을 "페이지와 진도율"로 다시 정리했다.
 - `.harness/PLAN.md`(LibraryBook 도메인/영속성, Library CRUD API)에서 `ReadingStatus` enum·필터·응답 필드 관련 체크리스트 항목을 제거했다.
 - CLIAR-31 도메인/영속성 구현이 아직 코드로 존재하지 않는 시점에 결정되어, 별도의 마이그레이션/리팩터링 없이 처음부터 `ReadingStatus` 없이 설계·구현한다.
+
+## 이후 반전됨
+
+**이 ADR 전체가 ADR-0010으로 반전됐다** — `readingStatus`(값 구성은 `PLANNED`/`READING`/`COMPLETED`로 이 ADR 당시의 `NOT_STARTED`/`READING`/`COMPLETED`와 다름)가 `library_book`에 다시 도입됐다. 다만 `currentPage`/`totalPages`로부터 상태를 자동 유도하는 규칙(2번)은 부활하지 않았다 — 여전히 클라이언트가 명시적으로 설정하는 독립 필드다.
