@@ -1,0 +1,10 @@
+# 상용 환경에서 base ConfigMap 위에 덮어쓸 값
+# AUTH_ISSUER_URI / AUTH_APP_CLIENT_ID 는 prod Cognito User Pool 값
+# TODO: 상용용 Cognito User Pool / Client 실제 값으로 교체하세요. (아래는 placeholder)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-book-config
+data:
+  AUTH_ISSUER_URI: "https://cognito-idp.ap-northeast-2.amazonaws.com/ap-northeast-2_PRODxxxxx"
+  AUTH_APP_CLIENT_ID: "prod-client-id-xxxxxxxx"
