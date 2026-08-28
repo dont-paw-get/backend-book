@@ -219,3 +219,39 @@ CLIAR-35 커밋(`74bb92a`) 이후 같은 세션에서 "swagger API 작성해" �
 커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
 
 다음 세션 시작 시: 이번 ADR-0009 구현(Librarian 축소, V6 마이그레이션, openapi.yaml/erd.dbml/DOMAIN.md 갱신)이 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. Member 서비스 쪽 DBML(대화로 다시 작성해 보여준 버전)은 이 저장소에 없으니, 사용자가 그 서비스의 실제 저장소에 반영했는지는 이 세션이 알 수 없다.
+
+## 2026-08-28: Book Discovery API를 title/author 검색에서 isbn 검색으로 전환 (CLIAR-161, ADR-0012)
+
+사용자가 "책 등록할 때 지금 책제목과 저자명 기준으로 알라딘 api를 찾고 있는데 기능 명세서가 바뀌었다 — isbn 기준으로 찾도록 하고, isbn 중복체크해서 기존에 존재하면 이미 저장된 책에 대한 데이터를 반환하도록 만들어. isbn 속성은 unique 값으로"라고 요청했다. 세션 시작 시 이미 `CLIAR-161-Book-정보-조회-isbn-기준으로-변경` 브랜치가 체크아웃되어 있어(원격에도 존재) 별도 브랜치를 만들지 않았다.
+
+구현 전에 기존 코드(`BookDiscoveryService`/`BookDiscoveryClient`/`AladinBookDiscoveryClient`/`LibraryBookService.createLibraryBook`)를 먼저 읽고, 문구가 모호한 지점 3가지를 `AskUserQuestion`으로 확인받았다: (1) title/author 파라미터는 완전히 제거하고 isbn 단일 필수 파라미터로 교체(권장안), (2) isbn 중복 확인은 등록(`createLibraryBook`) 시점이 아니라 검색(`/books/search`) 시점에 한다, (3) isbn 유일성 범위는 ADR-0007과 동일하게 회원별 유지(전역 아님, 권장안). 세 질문 모두 권장안대로 확정됐다. 이 설계를 `.harness/PLAN.md`에 적어 제시했고 사용자가 "이대로 진행해"로 승인했다.
+
+구현: `docs/api/openapi.yaml`(v0.9.0) — `searchBookInfo`의 `title`/`author` 파라미터를 `isbn`(필수)으로 교체, `BookSearchResponse`를 `books: ExternalBook[]`에서 `{alreadyRegistered, libraryBook?, book?}` 단일 결과 구조로 재설계, `InvalidSearchParameter` 응답 예시 메시지 갱신. `docs/api/decisions/0012-isbn-based-book-search.md`(ADR-0012) 신설, `docs/api/README.md` ADR 목록 갱신. `.harness/DOMAIN.md`의 "외부 도서 검색 → LibraryBook 생성 경계" 절과 "중복" 절 갱신(정책 자체는 불변, 노출 시점만 검색으로 앞당김).
+
+코드: `LibraryBookRepository.existsByIsbn(memberId, isbn): boolean`을 `findByMemberIdAndIsbn(memberId, isbn): Optional<LibraryBook>`로 확장(`LibraryBookJpaRepository`/`LibraryBookRepositoryJpaAdapter` 동반 변경) — `LibraryBookService.createLibraryBook`의 기존 409 체크와 신규 `BookDiscoveryService`가 이 메서드 하나를 공유한다. `BookDiscoveryClient.search(title, author): List<ExternalBook>`를 `lookup(isbn): Optional<ExternalBook>`로 교체하고 `AladinBookDiscoveryClient`가 알라딘 `ItemSearch.aspx` 대신 `ItemLookUp.aspx`(isbn 길이 10/13에 따라 `ItemIdType`을 `ISBN`/`ISBN13`으로 분기)를 호출하도록 재구현했다 — 기존 `AladinSearchResponse`/`AladinItem`/`AladinSubInfo` DTO와 `AuthorNameNormalizer`, "HTTP 200 + 바디 errorCode로 오류 판단" 패턴은 그대로 재사용했다. `BookDiscoveryService`가 `LibraryBookRepository`(library.application 포트)를 새로 의존하게 되어 discovery 패키지가 library 패키지를 단방향 참조하게 됐다(반대 방향 없음, 순환 없음) — `search(memberId, isbn)`이 먼저 서재를 조회해 있으면 알라딘을 호출하지 않고 신규 `BookSearchResult.alreadyRegistered(libraryBook)`를 반환하고, 없으면 `bookDiscoveryClient.lookup`으로 위임해 `found(book)`/`notFound()`를 반환한다. `BookDiscoveryController`가 다른 컨트롤러와 동일한 `@AuthenticationPrincipal Jwt` + `MemberIdResolver.resolve` 패턴으로 memberId를 얻도록 바뀌었다(이전엔 인증 principal을 쓰지 않았음). `discovery.web.dto.BookSearchResponse`가 `library.web.dto.LibraryBookDetailResponse`를 재사용해 `alreadyRegistered`일 때의 응답을 만든다.
+
+**라이브 검증을 하지 못했다는 점이 중요하다**: CLIAR-34 때는 `.env`의 `ALADIN_API_TTB_KEY`로 실제 알라딘 `ItemSearch`를 curl로 여러 번 호출해 응답 형태를 확인했지만, 이번 세션 시점엔 `.env`에 그 키 항목은 있으나 값이 비어 있어(`ALADIN_API_TTB_KEY=` 빈 문자열) `ItemLookUp.aspx`를 실제로 호출해보지 못했다. `ItemSearch`와 동일한 `{item: [...], errorCode, errorMessage}` 응답 래퍼를 갖는다는 문서 기반 가정으로 구현·테스트(fixture)를 작성했다 — 특히 "존재하지 않는 isbn을 조회하면 빈 `item` 배열인지, 아니면 `errorCode`가 오는지"를 확인하지 못한 채 "빈 배열"이라고 가정했다(후자라면 알라딘에 없는 책 검색이 502로 잘못 처리된다). `.harness/BACKLOG.md`에 TTBKey 확보 후 최우선으로 재검증할 항목으로 남겼다.
+
+테스트 갱신: `BookDiscoveryServiceTest`(Mockito로 재작성 — 이미 등록됨/알라딘에서 찾음/둘 다 없음 3분기 + isbn 공백·형식 오류 400), `BookDiscoveryControllerTest`(`@WebMvcTest`, JWT 인증 패턴 추가 + 3분기 + 400/401/502), `AladinBookDiscoveryClientTest`(`MockRestServiceServer`, isbn10/13 `ItemIdType` 분기 + 기존 errorCode/isbn13 우선순위 테스트를 lookup 방식으로 이식), `LibraryBookServiceTest`/`LibraryBookRepositoryTest`(mock/실제 호출을 `findByMemberIdAndIsbn`로 교체), `GlobalExceptionHandlerTest`(`InvalidSearchParameterException` 기본 메시지 변경 반영). `./gradlew compileJava compileTestJava compileIntegrationTestJava`, `./gradlew test`, `./gradlew check`(Docker Desktop을 이 세션에서 직접 기동시켜 실제 PostgreSQL Testcontainers로 검증) 전부 통과 확인. `docs/api/openapi.yaml`은 세션 스크래치패드의 파이썬 스크립트(`$ref` 무결성·중복 operationId·미사용 schema/response/parameter)로 재검증했다(operationId 26개, 이슈 없음) — 스크립트는 저장소에 커밋하지 않았다.
+
+`.harness/PLAN.md`에서 이번 섹션 제거(미완료 계획 없음 상태로 복귀), `.harness/STATE.md`에 단계 요약 반영, `.harness/BACKLOG.md`에 라이브 검증 미완료 항목 추가·오래된 "최대 10건 검색 결과" 문구 정리.
+
+커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
+
+다음 세션 시작 시: 이번 CLIAR-161 구현(isbn 기반 검색, `BookSearchResult`, `findByMemberIdAndIsbn`, ADR-0012, 관련 테스트 전체)이 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. `ALADIN_API_TTB_KEY`가 준비되면 `ItemLookUp.aspx` 라이브 검증(특히 "찾지 못함" 케이스가 빈 배열인지 errorCode인지)을 최우선으로 하고, 필요하면 `AladinBookDiscoveryClient.lookup`/`AladinBookDiscoveryClientTest`를 실제 응답에 맞게 수정한다.
+
+## 2026-08-28 (계속): 알라딘 API 키 확보 후 라이브 검증, errorCode 8 처리 버그 발견·수정
+
+같은 세션에서 사용자가 `.env`의 `ALADIN_API_TTB_KEY`를 채우고 "알라딘 API 키 추가했으니 테스트해봐"라고 요청했다. 값이 비어있지 않은지만 길이로 먼저 확인한 뒤(값 자체는 노출하지 않음), curl로 실제 `ItemLookUp.aspx`를 세 가지 케이스로 호출했다: (1) isbn13(9788932917245, 어린 왕자) 조회, (2) isbn10(8932917248) 조회, (3) 존재하지 않는 isbn13(9780000000002) 조회.
+
+(1)/(2)는 예상대로 `ItemSearch`와 동일한 `{item: [...], ...}` 래퍼로 응답했다. **(3)에서 직전 세션의 가정이 틀렸다는 게 드러났다** — 빈 `item` 배열이 아니라 `{"errorCode":8,"errorMessage":"키에 해당하는 상품이 존재하지 않습니다."}`를 반환했다. 직전 세션에 작성한 `AladinBookDiscoveryClient.lookup`은 모든 `errorCode`를 무조건 `AladinApiException`(502)으로 처리하고 있었으므로, 이 상태로는 "알라딘에 없는 책 검색"(정상적인 폴백 흐름)이 매번 502 서버 오류로 나갔을 것 — `.harness/BACKLOG.md`에 남겨뒀던 라이브 검증 필요 항목이 실제로 버그였음을 확인한 것이다.
+
+수정: `errorCode == 8`일 때만 "찾지 못함"(`Optional.empty()`)으로 처리하고, 그 외 `errorCode`는 기존대로 502로 유지하도록 `AladinBookDiscoveryClient.lookup`을 고쳤다(상수 `ERROR_CODE_ITEM_NOT_FOUND = 8` + 왜 8만 예외인지 설명하는 주석 추가). `AladinBookDiscoveryClientTest`의 fixture를 라이브로 캡처한 실제 응답(어린 왕자 전체 필드)과 `errorCode: 8` 응답으로 교체해 "찾지 못함"과 "진짜 API 오류"(errorCode 4 등)를 구분하는 테스트로 재작성했다.
+
+`.harness/STATE.md`(CLIAR-161 항목의 "라이브 검증 미완료" 문단을 검증 완료+발견한 문제로 교체), `.harness/ARCHITECTURE.md`(`AladinBookDiscoveryClient`/테스트 설명 갱신), `.harness/BACKLOG.md`(재검증 필요 항목 제거 — 이제 완료됨) 반영. `./gradlew compileJava compileTestJava test`, `./gradlew check`(Docker Desktop 기동, 실제 PostgreSQL) 전체 재통과 확인.
+
+앱을 실제로 띄워 HTTP로 `/api/v1/books/search`를 호출하는 end-to-end 테스트는 하지 않았다 — 모든 endpoint가 인증을 요구하는데(`SecurityConfig`) 실제 Cognito User Pool이 없어 유효한 JWT를 발급할 방법이 없기 때문이다(기존에도 동일한 제약, `BACKLOG.md`의 "실제 Cognito 연동 재검증" 항목 참조). 알라딘 쪽은 직접 curl로, 애플리케이션 로직 쪽은 `MockRestServiceServer` 기반 슬라이스 테스트로 검증하는 것으로 대신했다.
+
+커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
+
+다음 세션 시작 시: 이번 라이브 검증·버그 수정을 포함한 CLIAR-161 전체가 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다.

@@ -117,14 +117,14 @@ class LibraryBookRepositoryTest extends RepositoryIntegrationTestSupport {
     }
 
     @Test
-    void isbn으로_중복_여부를_확인한다() {
+    void isbn으로_등록된_책을_조회한다() {
         Long shelfId = shelf(MEMBER_1).getShelfId();
         libraryBookRepository.saveAndFlush(LibraryBook.register(
                 MEMBER_1, shelfId, "m", "책1", "저자", "9788932917245", null, null, null, null, null, 100
         ));
 
-        assertThat(libraryBookRepository.existsByMemberIdAndIsbn(MEMBER_1, "9788932917245")).isTrue();
-        assertThat(libraryBookRepository.existsByMemberIdAndIsbn(MEMBER_1, "9788932917246")).isFalse();
+        assertThat(libraryBookRepository.findByMemberIdAndIsbn(MEMBER_1, "9788932917245")).isPresent();
+        assertThat(libraryBookRepository.findByMemberIdAndIsbn(MEMBER_1, "9788932917246")).isEmpty();
     }
 
     @Test

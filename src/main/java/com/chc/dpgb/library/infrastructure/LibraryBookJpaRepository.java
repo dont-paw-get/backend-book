@@ -17,7 +17,7 @@ interface LibraryBookJpaRepository extends JpaRepository<LibraryBook, Long> {
 
     Optional<LibraryBook> findTopByShelfIdOrderByShelfRankDesc(Long shelfId);
 
-    boolean existsByMemberIdAndIsbn(UUID memberId, String isbn);
+    Optional<LibraryBook> findByMemberIdAndIsbn(UUID memberId, String isbn);
 
     long countByShelfId(Long shelfId);
 

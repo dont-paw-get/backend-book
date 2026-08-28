@@ -120,7 +120,8 @@ class LibraryBookServiceTest {
         Shelf shelf = Shelf.create(MEMBER_1, "책장", false);
         setShelfId(shelf, 1L);
         when(shelfRepository.findById(1L)).thenReturn(Optional.of(shelf));
-        when(libraryBookRepository.existsByIsbn(MEMBER_1, "9788932917245")).thenReturn(true);
+        when(libraryBookRepository.findByMemberIdAndIsbn(MEMBER_1, "9788932917245"))
+                .thenReturn(Optional.of(book(1L, MEMBER_1, 1L, ShelfRank.initial())));
 
         assertThatThrownBy(() -> libraryBookService.createLibraryBook(
                 MEMBER_1, 1L, "제목", "저자", "9788932917245", null, null, null, null, null, 100
