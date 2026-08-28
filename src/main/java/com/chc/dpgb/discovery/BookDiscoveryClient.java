@@ -1,8 +1,8 @@
 package com.chc.dpgb.discovery;
 
-import java.util.List;
+import java.util.Optional;
 
 public interface BookDiscoveryClient {
 
-    List<ExternalBook> search(String title, String author);
+    Optional<ExternalBook> lookup(String isbn);
 }

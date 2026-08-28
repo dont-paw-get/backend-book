@@ -62,7 +62,7 @@ public class LibraryBookService {
             Integer totalPages
     ) {
         Shelf shelf = resolveShelf(memberId, requestedShelfId);
-        if (isbn != null && libraryBookRepository.existsByIsbn(memberId, isbn)) {
+        if (isbn != null && libraryBookRepository.findByMemberIdAndIsbn(memberId, isbn).isPresent()) {
             throw new BookAlreadyRegisteredException();
         }
         String shelfRank = rankAfterWithRebalance(shelf.getShelfId());
