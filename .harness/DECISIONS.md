@@ -1,5 +1,15 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-30: 컨테이너 이미지를 멀티아키(amd64+arm64)로 빌드 — prod arm64 노드 CrashLoopBackOff 해결 (CLIAR-112)
+
+- **배경:** `dpyb-prod`의 `backend-book` 파드가 이틀 넘게 CrashLoopBackOff(exit 255, 550회 재시작)였다. 컨테이너 로그는 `exec /opt/java/openjdk/bin/java: exec format error` 한 줄뿐 — JVM이 기동조차 못 했다는 뜻이라 애플리케이션/설정 문제가 아니었다. CI가 `ubuntu-latest`(amd64)에서 `docker build`를 돌려 **단일 아키텍처 amd64** 이미지만 만들고 있었고(ECR 매니페스트가 manifest list가 아닌 `manifest.v2`로 확인), `dpyb-prod` 노드는 전부 arm64(Graviton)다.
+- **dev가 멀쩡했던 것은 우연이다:** `dpyb-dev`는 amd64/arm64 혼합이고 dev overlay에 `nodeSelector`가 없어 파드가 amd64 노드에 착지했을 뿐이다. Karpenter consolidation·노드 교체·amd64 여유 부족 중 하나만 걸려도 dev도 같은 증상으로 죽는다 — 즉 이것은 prod만의 문제가 아니라 **양쪽에 걸린 잠재 결함**이었다.
+- **결정: 멀티아키 이미지로 전환한다.** `Dockerfile`의 빌드 스테이지를 `--platform=$BUILDPLATFORM`으로 러너에 고정하고, CI를 `docker/setup-buildx-action` + `docker/build-push-action`(`platforms: linux/amd64,linux/arm64`)으로 교체했다. Java jar이 아키텍처 중립이라 Gradle 빌드는 여전히 한 번만 돌고, 런타임 스테이지에는 `RUN`이 없어 QEMU 에뮬레이션 실행이 발생하지 않는다 — 멀티아키 비용이 사실상 0인 이유.
+- **채택하지 않은 대안 1 — prod NodePool을 amd64로 고정**(`nodepool-book.yaml`에 `kubernetes.io/arch In ["amd64"]`): 이미지 변경 없이 가장 빠르지만 prod 클러스터 전체가 Graviton인 비용 설계를 backend-book만 되돌리는 셈이고, 단일 아키텍처 이미지라는 근본 원인과 dev의 잠재 결함이 그대로 남는다. **긴급 롤백 레버로만 남겨둔다.**
+- **채택하지 않은 대안 2 — arm64 단독 빌드**: dev 클러스터가 혼합 아키텍처라 dev 파드가 amd64 노드에 스케줄되면 방향만 뒤집힌 같은 장애가 난다.
+- **부수 결정:** `provenance: false`. buildx 기본값은 provenance attestation을 붙여 ECR 이미지 목록에 `unknown/unknown` 항목이 생기는데, 이를 꺼서 매니페스트가 아키텍처 2개로만 보이게 했다.
+- **영향받은 산출물:** `Dockerfile`, `.github/workflows/build-push-ecr.yml`, `.harness/ARCHITECTURE.md`(배포 절 — 노드 아키텍처 현황·멀티아키 빌드·Dockerfile 2-스테이지 구조), `.harness/STATE.md`. `k8s/`·`argocd/` 매니페스트는 변경하지 않았다(문제가 배포 정의가 아니라 이미지에 있었으므로).
+
 ## 2026-08-25 (계속): DB 스키마 대개편 구현 중 발견한 기술적 결정 — soft delete 구현 방식, totalPages nullable 동작, LibrarianLevel 엔티티 보류
 
 - **soft delete를 `@SQLRestriction`으로 구현:** 서비스/리포지토리마다 `deleted_at IS NULL` 조건을 반복하지 않고, `Shelf`/`LibraryBook`/`Scrap`/`Librarian` 엔티티 클래스에 Hibernate `@SQLRestriction("deleted_at IS NULL")`(6.3+, 구 `@Where` 대체)을 붙여 모든 조회(파생 쿼리·JPQL·`findById` 포함)에 자동 적용되게 했다. 하드 `delete()` 포트 메서드는 4개 aggregate 모두 제거하고, 서비스가 `entity.softDelete(Instant.now()); repository.save(entity);`로 통일했다.

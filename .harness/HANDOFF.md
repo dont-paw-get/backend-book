@@ -280,3 +280,25 @@ CLIAR-35 커밋(`74bb92a`) 이후 같은 세션에서 "swagger API 작성해" �
 `.harness/STATE.md`에 단계 한 줄 요약, `.harness/BACKLOG.md`에 미결 항목(201 응답 예시를 요청 예시와 짝 맞출지) 추가. `PLAN.md`는 이번 작업이 같은 세션에서 끝나 미완료 항목이 없어 그대로 뒀다.
 
 **다음 세션 시작 시**: 이 작업(openapi 예시 2종 + 4계층 회귀 테스트 + STATE/BACKLOG 갱신)이 한 커밋으로 `develop`에 올라가 있다. push는 하지 않았으니 필요하면 사용자에게 확인할 것. 미결 항목은 `BACKLOG.md`의 201 응답 예시 건 하나다. 로컬에 앱(`java -jar`)과 `docker compose` postgres가 떠 있는 채로 세션이 끝났을 수 있으니 필요하면 정리한다.
+
+## 2026-08-30: prod EKS 배포 CrashLoopBackOff 원인 규명과 멀티아키 이미지 전환 (CLIAR-112)
+
+사용자가 "prod 환경 배포를 마무리하려는데 ArgoCD에서 Degraded가 떠 있다, `backend-book` 파드가 CrashLoopBackOff(exit 255)이고 svc/ing는 정상인데 deploy 단계에서 문제가 난다"며 파드/Deployment 상태를 붙여 요청했다. 세션 시작 시 브랜치는 `develop`이었고, 계획 확정 후 사용자가 직접 `CLIAR-112-Book-Server-EKS-prod-배포` 브랜치를 만들어 옮겨둔 상태로 구현을 시작했다.
+
+세션 앞부분은 AWS CLI 로그인 질문이었다. `~/.aws`에 `default`(장기 IAM 키)와 `mfa`(임시 세션) 두 프로필이 있고, `mfa` 프로필이 `ExpiredToken`으로 만료된 상태였다. MFA 디바이스는 두 개 등록되어 있는데 CLI에서 쓸 수 있는 건 가상 OTP(`arn:aws:iam::594532711953:mfa/otp-cli`)뿐이고 나머지 하나는 U2F 보안키(콘솔 전용)다. PowerShell용 `sts get-session-token` 재발급 절차를 안내했고 사용자가 갱신했다.
+
+**원인 규명 과정**: prod 클러스터가 kubeconfig에 없어 `aws eks update-kubeconfig --name dpyb-prod --alias dpyb-prod`로 컨텍스트를 추가했다(사용자 머신의 `~/.kube/config` 변경). `kubectl logs --previous`로 크래시한 이전 컨테이너 로그를 보니 단 한 줄, `exec /opt/java/openjdk/bin/java: exec format error`였다 — Spring 배너도 스택트레이스도 없다는 건 JVM이 exec 시점에 실패했다는 뜻이라 애플리케이션/설정 문제가 아니다. 이어서 세 가지를 교차 확인했다: (1) `dpyb-prod` 노드는 전부 arm64(`workload=book` 전용 노드는 `t4g.medium`, 나머지 `c6g.large`), (2) ECR의 prod 이미지가 manifest list가 아닌 `manifest.v2` **단일 아키텍처**, (3) CI는 `ubuntu-latest`(amd64)에서 `docker build`를 그냥 실행. → amd64 이미지를 arm64 노드에서 돌린 것이 확정.
+
+**dev가 멀쩡했던 이유도 밝혀 기록해뒀다**: `dpyb-dev`는 amd64(`r5a`/`c5a`)와 arm64(`c6g`)가 섞여 있고 dev overlay에는 `nodeSelector`가 없어서, dev 파드가 우연히 amd64 노드(`i-0a72686b6f55953e8`)에 착지했을 뿐이다. Karpenter consolidation·노드 교체·amd64 여유 부족 중 하나만 걸리면 dev도 같은 증상으로 죽는다. 사용자가 "dev는 혼합이라 문제없고 prod는 arm64만이라 문제냐"고 확인했을 때, "dev는 문제없는 게 아니라 우연히 안 걸린 것"이라는 점을 명확히 짚었다 — 이것이 NodePool 고정 대신 멀티아키를 택한 핵심 근거다.
+
+`AskUserQuestion`으로 세 가지를 확정받았다: 해결 방식은 **멀티아키 이미지**(대안이던 "prod NodePool을 amd64로 고정"은 긴급 롤백 레버로만 남김), 브랜치는 사용자가 이미 만들어 옮김, 수행 범위는 **커밋까지**(push·PR·main 병합은 사용자가 직접).
+
+**구현**: `Dockerfile`의 빌드 스테이지를 `FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk AS build`로 고정했다 — jar이 아키텍처 중립이라 Gradle은 러너 네이티브로 한 번만 돌고, 런타임 스테이지(`eclipse-temurin:21-jre`)만 타깃 아키텍처를 따라간다. 런타임 스테이지에 `RUN`이 없으므로 QEMU 에뮬레이션 실행 자체가 없어 멀티아키 비용이 사실상 0이다. `.github/workflows/build-push-ecr.yml`은 `setup-qemu-action`/`setup-buildx-action` 추가 후 `docker build`/`docker tag`/`docker push` 스크립트를 `docker/build-push-action@v6`(`platforms: linux/amd64,linux/arm64`, `push: true`, `provenance: false`)로 교체했다. **buildx 멀티플랫폼 빌드는 로컬에 이미지가 남지 않아 `docker tag`를 쓸 수 없다** — 그래서 push할 태그 전부를 "Resolve target by branch" 스텝이 `tags` 멀티라인 출력으로 계산해 넘기도록 함께 바꿨다(prod=SHA 1개, dev=SHA + `develop-latest`).
+
+검증: `eclipse-temurin:21-jre`에 `linux/arm64/v8` 변형이 실제로 있는지 `docker buildx imagetools inspect`로 확인(Docker 데몬 없이 레지스트리 직접 조회로 됐다). 태그 계산 셸 로직은 임시 디렉터리에서 `main`/`develop` 양쪽으로 시뮬레이션해 출력이 의도대로인지 확인. 워크플로우 YAML은 파이썬 `yaml.safe_load`로 파싱 검증. `./gradlew test` 통과(Java 코드 변경은 없다). **실제 멀티아키 빌드는 로컬에서 돌려보지 못했다** — Docker 데몬이 꺼져 있었고, 진짜 검증은 CI에서 나므로 그쪽으로 미뤘다.
+
+문서: `.harness/ARCHITECTURE.md` 배포 절에 노드 아키텍처 현황(prod 전부 arm64/Graviton, dev 혼합)·멀티아키 CI·Dockerfile 2-스테이지 구조 반영, `.harness/DECISIONS.md` 최상단에 결정과 기각한 대안 2종 기록, `.harness/STATE.md`에 단계 한 줄 요약, `.harness/PLAN.md`를 배포·검증 잔여 단계로 재작성(긴급 롤백용 NodePool amd64 고정 YAML 스니펫 포함).
+
+**다음 세션 시작 시**: 이 작업은 `CLIAR-112-Book-Server-EKS-prod-배포` 브랜치에 커밋만 되어 있고 **push되지 않았다**. `.harness/PLAN.md`의 잔여 체크리스트(push → develop PR → main 병합 → ECR 매니페스트가 아키텍처 2개인지 확인 → prod 파드 `2/2 Running` → 잔여 ReplicaSet 정리 → ArgoCD Healthy → `/health` 200)를 이어서 진행한다. prod ECR은 IMMUTABLE이라 기존 SHA 재push가 아닌 **새 병합 커밋 SHA**로 나가야 한다.
+
+**중요한 미확인 사항**: prod에서 JVM이 지금까지 한 번도 기동한 적이 없으므로, 아키텍처를 고치면 그 다음 단계 문제가 처음 드러날 수 있다. prod Secret에 `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`/`ALADIN_API_TTB_KEY` 4개 키가 존재하는 것까지만 확인했고 **RDS 실제 접속·Flyway 마이그레이션·Cognito 검증은 전부 미확인**이다. 파드가 뜬 직후 로그를 반드시 확인할 것 — 이번엔 죽더라도 스택트레이스가 남는다.
