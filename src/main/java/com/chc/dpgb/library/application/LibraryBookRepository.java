@@ -19,7 +19,7 @@ public interface LibraryBookRepository {
 
     Optional<LibraryBook> findLastRanked(Long shelfId);
 
-    boolean existsByIsbn(UUID memberId, String isbn);
+    Optional<LibraryBook> findByMemberIdAndIsbn(UUID memberId, String isbn);
 
     long countByShelfId(Long shelfId);
 

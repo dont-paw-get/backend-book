@@ -51,6 +51,18 @@ class LibraryBookTest {
     }
 
     @Test
+    void genre와_readingStatus를_지정하면_기본값으로_덮어쓰지_않는다() {
+        LibraryBook book = LibraryBook.register(
+                MEMBER_1, 1L, "m", "어린 왕자", "생텍쥐페리", "9788932917245", Genre.LITERARY_FICTION,
+                "열린책들", LocalDate.of(2015, 10, 20), "https://example.com/cover.jpg",
+                ReadingStatus.READING, 160
+        );
+
+        assertThat(book.getGenre()).isEqualTo(Genre.LITERARY_FICTION);
+        assertThat(book.getReadingStatus()).isEqualTo(ReadingStatus.READING);
+    }
+
+    @Test
     void updateProgress는_currentPage와_progress를_갱신한다() {
         LibraryBook book = register(160);
 

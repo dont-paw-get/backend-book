@@ -67,19 +67,20 @@ src/main/java/com/chc/dpgb
 │     ├─ ShelfController.java            # POST/GET /api/v1/library/shelves, PATCH/DELETE /{shelfId}, GET /{shelfId}/books
 │     ├─ ScrapController.java            # 클래스 레벨 @RequestMapping 없이 두 베이스 경로(POST/GET /api/v1/library/books/{bookId}/scraps, GET/PATCH/DELETE /api/v1/library/scraps/{scrapId})를 메서드별 전체 경로로 처리 — 이 저장소 최초의 다중 베이스 경로 컨트롤러
 │     └─ dto                             # openapi.yaml 스키마 1:1 대응 record. Bean Validation 미도입 — 필수/불변식 검증은 도메인 계층의 IllegalArgumentException을 서비스가 잡아 concrete 예외로 번역하는 방식으로 통일(컨트롤러는 primitive 언박싱이 필요한 필드의 null만 직접 체크). LibraryBook 관련 DTO에 genre/readingStatus, Scrap 관련 DTO에 scrapImageUrl 포함
-├─ discovery
+├─ discovery                              # ADR-0012(isbn 기반 검색)로 재설계 — library.application 포트(LibraryBookRepository)를 단방향 참조(반대 방향 없음)
 │  ├─ ExternalBook.java                  # record — 포트가 반환하는 공용 표현(외부 API 벤더 비의존), 컨트롤러가 그대로 응답에 사용
-│  ├─ BookDiscoveryClient.java           # 포트(순수 인터페이스) — List<ExternalBook> search(title, author)
-│  ├─ BookDiscoveryService.java          # title/author 둘 다 없으면 400(INVALID_SEARCH_PARAMETER), 있으면 포트에 위임. 생성자 주입 지점에 @Lazy(아래 aladin 패키지 참조)
+│  ├─ BookSearchResult.java              # record(libraryBook, book) — alreadyRegistered/found/notFound 팩토리. libraryBook이 있으면 이미 등록된 것
+│  ├─ BookDiscoveryClient.java           # 포트(순수 인터페이스) — Optional<ExternalBook> lookup(isbn)
+│  ├─ BookDiscoveryService.java          # isbn이 없거나 형식이 틀리면 400(INVALID_SEARCH_PARAMETER). LibraryBookRepository.findByMemberIdAndIsbn로 먼저 서재를 조회 — 있으면 알라딘 호출 없이 alreadyRegistered, 없으면 포트(lookup)에 위임. 생성자 주입 지점에 @Lazy(아래 aladin 패키지 참조)
 │  ├─ aladin                             # 알라딘 API 연동 구현 세부사항 — 전부 package-private, discovery 패키지 밖에서는 BookDiscoveryClient 포트만 보인다
-│  │  ├─ AladinBookDiscoveryClient.java  # @Component + @Lazy, RestClient로 실제 ItemSearch 호출. HTTP 200이어도 응답 바디의 errorCode가 있으면 AladinApiException(502)
+│  │  ├─ AladinBookDiscoveryClient.java  # @Component + @Lazy, RestClient로 실제 ItemLookUp(isbn 단건 조회, isbn 길이로 ItemIdType을 ISBN/ISBN13 분기) 호출(라이브 호출로 확인). HTTP 200이어도 응답 바디의 errorCode가 있으면 AladinApiException(502) — 단, errorCode 8("키에 해당하는 상품이 존재하지 않습니다")만은 예외이며 "찾지 못함"(Optional.empty())으로 처리한다. ItemSearch(결과 없음=빈 item 배열)와 다른 지점이라 라이브 호출로 실제 확인했다
 │  │  ├─ AladinSearchResponse.java       # 응답 DTO(record) — 미매핑 필드가 오면 역직렬화 실패(엄격 검증, ignoreUnknown 미사용)
 │  │  ├─ AladinItem.java                 # 응답 항목 DTO(record)
 │  │  ├─ AladinSubInfo.java              # itemPage(총 페이지) 등 optResult로 요청하는 부가 필드 — 실무에서 거의 항상 비어 있음(라이브 호출로 확인)
 │  │  └─ AuthorNameNormalizer.java       # "이름 (역할), 이름 (역할)" → "이름, 이름" 변환 순수 유틸
 │  └─ web
-│     ├─ BookDiscoveryController.java    # GET /api/v1/books/search
-│     └─ dto/BookSearchResponse.java     # { books: ExternalBook[] }
+│     ├─ BookDiscoveryController.java    # GET /api/v1/books/search?isbn=. @AuthenticationPrincipal Jwt + MemberIdResolver로 memberId 획득(다른 컨트롤러와 동일 패턴)
+│     └─ dto/BookSearchResponse.java     # { alreadyRegistered, libraryBook?(library.web.dto.LibraryBookDetailResponse 재사용), book?(ExternalBook) }
 ├─ librarian                             # library와 동일한 4계층(domain/application/infrastructure/web) 구조. 회원 소유 사서 인스턴스 모델로 전면 재작성(ADR-0011, ADR-0009 대체) — 마스터 카탈로그 조회만 하던 이전 구조에서 획득/개명/방출/대표지정까지 확장
 │  ├─ domain
 │  │  ├─ Librarian.java                  # aggregate root(JPA entity), @SQLRestriction("deleted_at IS NULL") — memberId(UUID)/type/name/level/experience/isRepresentative. acquire/rename/markAsRepresentative/unmarkAsRepresentative/softDelete 도메인 메서드
@@ -136,7 +137,7 @@ src/test/java/com/chc/dpgb
 ├─ discovery/BookDiscoveryServiceTest.java      # Mockito
 ├─ discovery/web/BookDiscoveryControllerTest.java  # @WebMvcTest
 ├─ discovery/aladin/AuthorNameNormalizerTest.java  # 순수 함수 단위 테스트
-├─ discovery/aladin/AladinBookDiscoveryClientTest.java  # MockRestServiceServer + 실제로 캡처한 알라딘 응답 fixture(네트워크 미사용)
+├─ discovery/aladin/AladinBookDiscoveryClientTest.java  # MockRestServiceServer(네트워크 미사용) — fixture는 ItemLookUp 라이브 호출로 캡처한 실제 응답(CLIAR-161) + errorCode 8("찾지 못함") 응답
 ├─ librarian/application/LibrarianServiceTest.java      # Mockito — 타입 카탈로그/획득(중복 409)/목록/개명/대표지정(기존 대표 해제 포함)/대표조회(미선택 404)/방출
 ├─ librarian/web/LibrarianControllerTest.java           # @WebMvcTest — 7개 endpoint 전수
 └─ security/...  # validator/MemberIdResolver(UUID 반환) 단위 테스트, SecurityConfigTest
@@ -191,13 +192,14 @@ Book Service는 database-per-service 원칙에 따라 자신만의 PostgreSQL �
 `backend-record`와 동일한 GitOps 패턴을 그대로 이식했다: GitHub Actions가 ECR에 이미지를 빌드/푸시하고 dev overlay의 이미지 태그를 갱신하는 커밋을 push하면, ArgoCD가 그 변경을 감지해 자동 동기화한다. 애플리케이션 코드가 클러스터를 직접 건드리지 않는다(push-to-deploy가 아니라 pull 기반).
 
 - ECR: `594532711953.dkr.ecr.ap-northeast-2.amazonaws.com/dpyb-dev/dpyb-book`, EKS 클러스터: `dpyb-dev`
-- `.github/workflows/build-push-ecr.yml`: `develop` push(또는 수동 `workflow_dispatch`) 시 `Dockerfile`로 이미지를 빌드해 SHA 태그 + `develop-latest` 태그로 ECR에 푸시하고, `k8s/overlays/dev/kustomization.yaml`의 `newTag`를 SHA로 갱신하는 커밋을 같은 브랜치에 push한다(`paths-ignore: k8s/**`로 이 커밋 자체가 워크플로우를 다시 트리거하는 무한루프를 막는다). `main` push → prod도 활성화되어 있다: "Resolve target by branch" 스텝이 브랜치별로 대상을 나눠 `develop`은 `dpyb-dev/dpyb-book`(MUTABLE, `develop-latest` movable 태그 push) + dev overlay를, `main`은 `dpyb-prod/dpyb-book`(IMMUTABLE, 커밋 SHA 태그만 push — movable 태그 skip) + prod overlay를 갱신한다.
-- `k8s/`: Kustomize 기반. `base/`(Deployment/Service/Ingress/ConfigMap 공통 정의, namespace/replicas/image태그는 두지 않음) + `overlays/dev/`(namespace `dpyb-book-dev`, replicas 1, image `newTag: develop-latest`를 CI가 커밋 SHA로 갱신, `configmap-patch.yaml`로 dev Cognito 값 주입) + `overlays/prod/`(활성. namespace `dpyb-book`, replicas 2, image `newName: dpyb-prod/dpyb-book`·`newTag`를 CI가 커밋 SHA로 갱신, `configmap-patch.yaml`로 prod Cognito 값 주입). 상용은 book 전용 노드 분리를 위해 `nodepin-patch.yaml`로 `nodeSelector workload=book` + `toleration dedicated=book:NoSchedule`을 얹고, kustomization의 `patches`에서 이를 참조한다. `k8s/cluster/nodepool-book.yaml`은 이 상용 노드 분리를 뒷받침하는 Karpenter(EKS Auto Mode) NodePool로, `workload=book` label과 `dedicated=book:NoSchedule` taint를 가진 노드를 프로비저닝한다 — dev 클러스터에는 적용하지 않고 `dpyb-prod` 컨텍스트에서 `kubectl apply`로 1회 수동 적용한다(GitOps 대상 아님). `k8s/secret.example.yaml`은 실제 값 없는 구조 예시일 뿐이고, 실제 Secret(`backend-book-secret`: `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`/`ALADIN_API_TTB_KEY`)은 Git에 커밋하지 않고 `kubectl create secret` 또는 SealedSecrets/External Secrets로 클러스터에 직접 생성한다.
+- `.github/workflows/build-push-ecr.yml`: `develop` push(또는 수동 `workflow_dispatch`) 시 `Dockerfile`로 이미지를 빌드해 SHA 태그 + `develop-latest` 태그로 ECR에 푸시하고, `k8s/overlays/dev/kustomization.yaml`의 `newTag`를 SHA로 갱신하는 커밋을 같은 브랜치에 push한다(`paths-ignore: k8s/**`로 이 커밋 자체가 워크플로우를 다시 트리거하는 무한루프를 막는다). `main` push → prod도 활성화되어 있다: "Resolve target by branch" 스텝이 브랜치별로 대상을 나눠 `develop`은 `dpyb-dev/dpyb-book`(MUTABLE, `develop-latest` movable 태그 push) + dev overlay를, `main`은 `dpyb-prod/dpyb-book`(IMMUTABLE, 커밋 SHA 태그만 push — movable 태그 skip) + prod overlay를 갱신한다. 빌드는 `docker/setup-buildx-action` + `docker/build-push-action`으로 **멀티아키(`linux/amd64,linux/arm64`)** 이미지를 만든다 — buildx 멀티플랫폼 빌드는 로컬 이미지가 남지 않아 `docker tag`를 쓸 수 없으므로, push할 태그 전부를 "Resolve target by branch" 스텝이 `tags` 출력으로 계산해 한 번에 넘긴다. `provenance: false`로 attestation(unknown/unknown) 매니페스트가 붙지 않게 한다.
+- `k8s/`: Kustomize 기반. `base/`(Deployment/Service/Ingress/ConfigMap 공통 정의, namespace/replicas/image태그는 두지 않음) + `overlays/dev/`(namespace `dpyb-book-dev`, replicas 1, image `newTag: develop-latest`를 CI가 커밋 SHA로 갱신, `configmap-patch.yaml`로 dev Cognito 값 주입) + `overlays/prod/`(활성. namespace `dpyb-book`, replicas 2, image `newName: dpyb-prod/dpyb-book`·`newTag`를 CI가 커밋 SHA로 갱신, `configmap-patch.yaml`로 prod Cognito 값 주입). 상용은 book 전용 노드 분리를 위해 `nodepin-patch.yaml`로 `nodeSelector workload=book` + `toleration dedicated=book:NoSchedule`을 얹고, kustomization의 `patches`에서 이를 참조한다. `k8s/cluster/nodepool-book.yaml`은 이 상용 노드 분리를 뒷받침하는 Karpenter(EKS Auto Mode) NodePool로, `workload=book` label과 `dedicated=book:NoSchedule` taint를 가진 노드를 프로비저닝한다 — dev 클러스터에는 적용하지 않고 `dpyb-prod` 컨텍스트에서 `kubectl apply`로 1회 수동 적용한다(GitOps 대상 아님). 이 NodePool은 인스턴스 카테고리(`t`/`m`)만 제약하고 아키텍처는 제약하지 않으며, 실제로 프로비저닝된 `dpyb-prod` 노드는 전부 **arm64(Graviton)**다(`t4g.medium`/`c6g.large`). `dpyb-dev`는 amd64(`r5a`/`c5a`)와 arm64(`c6g`)가 섞여 있고 dev overlay에는 `nodeSelector`가 없어 파드가 어느 쪽에도 착지할 수 있다 — 그래서 컨테이너 이미지는 항상 멀티아키여야 한다. `k8s/secret.example.yaml`은 실제 값 없는 구조 예시일 뿐이고, 실제 Secret(`backend-book-secret`: `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`/`ALADIN_API_TTB_KEY`)은 Git에 커밋하지 않고 `kubectl create secret` 또는 SealedSecrets/External Secrets로 클러스터에 직접 생성한다.
 - ConfigMap(`backend-book-config`)에는 민감하지 않은 값만 둔다: `SPRING_PROFILES_ACTIVE=prod`(local 프로필과 달리 배포 환경은 항상 env var 기반 datasource를 쓰는 `application-prod.yaml`을 활성화 — dev/prod 네임스페이스 구분은 Spring 프로필이 아니라 overlay의 namespace/replicas/설정값으로 한다), `AUTH_ISSUER_URI`/`AUTH_APP_CLIENT_ID`(Cognito, 비밀은 아니지만 환경별로 다른 User Pool을 쓸 수 있어 overlay의 `configmap-patch.yaml`에서 채움 — dev·prod 모두 실값이 채워져 있고, 현재는 prod CD 파이프라인 검증을 위해 양쪽이 같은 dev User Pool(`ap-northeast-2_y1mKz50El`)을 공용한다. 상용 전용 User Pool 준비 시 prod overlay만 교체 — `.harness/BACKLOG.md`).
 - Flyway 마이그레이션은 `spring.flyway.enabled: true`로 앱 기동 시 자동 실행되므로, `backend-record`(Python/Alembic)처럼 별도 `initContainer`로 마이그레이션을 분리하지 않는다.
 - readiness/liveness probe는 `GET /health`(`com.chc.dpgb.health.HealthController`, 인증 불필요)를 대상으로 한다. ALB Ingress의 `alb.ingress.kubernetes.io/healthcheck-path`도 동일 경로를 쓴다.
 - `argocd/application-dev.yaml`: `targetRevision: develop`, `path: k8s/overlays/dev`, `automated.prune+selfHeal` — dev는 완전 자동 배포(같은 클러스터 `kubernetes.default.svc`). `argocd/application-prod.yaml`은 `targetRevision: main`, `path: k8s/overlays/prod`로 활성화되어 있으며, dev와 달리 원격 `dpyb-prod` 클러스터(`destination.name: dpyb-prod`, 사전에 `argocd cluster add --name dpyb-prod` 등록 필요)로 배포한다.
 - ALB IngressClass(`alb`)는 `backend-auth` 레포에서 클러스터 전역으로 이미 구성되어 있고 여러 서비스가 공유한다 — 이 저장소에서 별도로 만들지 않는다.
+- 배포용 `Dockerfile`은 2-스테이지다. 빌드 스테이지는 `FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk`로 러너 네이티브 아키텍처에 고정해 Gradle을 한 번만 실행하고(산출물 jar이 아키텍처 중립이므로 가능), 런타임 스테이지(`eclipse-temurin:21-jre`)만 타깃 아키텍처를 따라간다 — 멀티아키 빌드에 QEMU 에뮬레이션 비용이 들지 않는 이유다.
 - 배포용 `Dockerfile`은 root로 실행되고(별도 `USER` 없음) non-root 사용자를 두지 않는다 — `k8s/base/deployment.yaml`의 `securityContext`도 이에 맞춰 `runAsNonRoot`/`readOnlyRootFilesystem`을 강제하지 않는다(CI/CD 구축 시점에 사용자가 확인, Dockerfile 자체는 변경하지 않기로 결정).
 
 ## Git

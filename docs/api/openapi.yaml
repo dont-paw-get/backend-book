@@ -2,13 +2,13 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Virtual Shelf Book Service API
-  version: 0.8.0
+  version: 0.9.0
   description: |
     Virtual Shelf MSA의 Book Service 계약이다.
     알라딘 API 기반 외부 도서 검색, 개인 서재 관리, 독서 진도, 문장 스크랩, 동물 사서를 제공한다.
 
     표지 OCR과 AI 기반 도서/무드 분석은 다른 MSA 컴포넌트가 담당하며 이 계약의 범위 밖이다.
-    이 API Server는 이미 인식된 제목/저자를 넘겨받아 외부 도서 API 조회, 독서 진도 계산,
+    이 API Server는 이미 인식된 isbn을 넘겨받아 외부 도서 API 조회, 독서 진도 계산,
     서재·스크랩·동물 사서 CRUD 등 단순 데이터베이스 CRUD로 해결 가능한 부분만 다룬다.
 
     모든 API는 인증이 필요하다. 사용자 식별자는 요청 body가 아니라 검증된 인증 principal에서 얻는다.
@@ -40,44 +40,57 @@ paths:
       operationId: searchBookInfo
       summary: 도서 정보 조회
       description: |
-        인식되었거나 사용자가 입력한 제목/저자를 기반으로 알라딘 API를 검색한다.
-        title과 author 중 하나 이상은 공백이 아닌 값이어야 한다.
-        검색 결과가 없으면 200과 빈 books 배열을 반환한다(사용자가 수동으로 도서 정보를 입력하는 폴백 흐름으로 이어진다).
+        isbn으로 알라딘 API를 조회한다.
+        로그인 사용자의 서재에 이미 그 isbn으로 등록된 책이 있으면 알라딘을 호출하지 않고 저장된 도서 데이터(`libraryBook`)를 그대로 반환한다.
+        등록되어 있지 않으면 알라딘에서 조회해 `book`으로 반환하고, 알라딘에도 없으면 `book`이 생략된다(사용자가 수동으로 도서 정보를 입력하는 폴백 흐름으로 이어진다).
       parameters:
-        - name: title
+        - name: isbn
           in: query
-          required: false
-          description: 도서 제목
+          required: true
+          description: ISBN-10 또는 ISBN-13
           schema:
             type: string
-            minLength: 1
-            maxLength: 200
-          example: 어린 왕자
-        - name: author
-          in: query
-          required: false
-          description: 저자명
-          schema:
-            type: string
-            minLength: 1
-            maxLength: 100
-          example: 생텍쥐페리
+            pattern: "^(?:[0-9]{10}|[0-9]{13})$"
+          example: "9788932917245"
       responses:
         "200":
-          description: 도서 검색 성공
+          description: 도서 조회 성공
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/BookSearchResponse"
-              example:
-                books:
-                  - title: 어린 왕자
-                    author: 앙투안 드 생텍쥐페리
-                    isbn: "9788932917245"
-                    publisher: 열린책들
-                    publishedDate: "2015-10-20"
-                    totalPages: 160
-                    coverUrl: https://example.com/covers/9788932917245.jpg
+              examples:
+                알라딘에서_찾음:
+                  value:
+                    alreadyRegistered: false
+                    book:
+                      title: 어린 왕자
+                      author: 앙투안 드 생텍쥐페리
+                      isbn: "9788932917245"
+                      publisher: 열린책들
+                      publishedDate: "2015-10-20"
+                      totalPages: 160
+                      coverUrl: https://example.com/covers/9788932917245.jpg
+                이미_서재에_등록됨:
+                  value:
+                    alreadyRegistered: true
+                    libraryBook:
+                      bookId: 123
+                      shelfId: 1
+                      shelfRank: "m"
+                      title: 어린 왕자
+                      author: 앙투안 드 생텍쥐페리
+                      isbn: "9788932917245"
+                      genre: NONE
+                      publisher: 열린책들
+                      totalPages: 160
+                      coverUrl: https://example.com/covers/9788932917245.jpg
+                      readingStatus: PLANNED
+                      currentPage: 0
+                      progress: 0.0
+                알라딘에도_없음:
+                  value:
+                    alreadyRegistered: false
         "400":
           $ref: "#/components/responses/InvalidSearchParameter"
         "401":
@@ -101,14 +114,36 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateLibraryBookRequest"
-            example:
-              title: 어린 왕자
-              author: 앙투안 드 생텍쥐페리
-              isbn: "9788932917245"
-              publisher: 열린책들
-              publishedDate: "2015-10-20"
-              totalPages: 160
-              coverUrl: https://example.com/covers/9788932917245.jpg
+            examples:
+              전체_입력:
+                summary: genre/readingStatus/shelfId까지 모두 지정
+                description: |
+                  보낸 값이 그대로 저장된다 — 서버 기본값으로 덮어쓰지 않는다.
+                  `shelfId`는 로그인 사용자 소유의 책장이어야 한다(아니면 400).
+                value:
+                  title: 어린 왕자
+                  author: 앙투안 드 생텍쥐페리
+                  isbn: "9788932917245"
+                  genre: LITERARY_FICTION
+                  publisher: 열린책들
+                  publishedDate: "2015-10-20"
+                  totalPages: 160
+                  coverUrl: https://example.com/covers/9788932917245.jpg
+                  readingStatus: READING
+                  shelfId: 1
+              선택_필드_생략:
+                summary: genre/readingStatus/shelfId 생략 — 서버 기본값 적용
+                description: |
+                  `genre`는 `NONE`, `readingStatus`는 `PLANNED`로 저장되고
+                  사용자의 기본 책장에 등록된다.
+                value:
+                  title: 어린 왕자
+                  author: 앙투안 드 생텍쥐페리
+                  isbn: "9788932917245"
+                  publisher: 열린책들
+                  publishedDate: "2015-10-20"
+                  totalPages: 160
+                  coverUrl: https://example.com/covers/9788932917245.jpg
       responses:
         "201":
           description: 서재 책 등록 성공
@@ -1088,12 +1123,17 @@ components:
     BookSearchResponse:
       type: object
       additionalProperties: false
-      required: [books]
+      required: [alreadyRegistered]
       properties:
-        books:
-          type: array
-          items:
-            $ref: "#/components/schemas/ExternalBook"
+        alreadyRegistered:
+          type: boolean
+          description: 로그인 사용자의 서재에 이미 이 isbn으로 등록된 책이 있으면 true
+        libraryBook:
+          $ref: "#/components/schemas/LibraryBookDetailResponse"
+          description: alreadyRegistered가 true일 때만 존재 — 이미 저장된 도서 데이터
+        book:
+          $ref: "#/components/schemas/ExternalBook"
+          description: alreadyRegistered가 false이고 알라딘에서 해당 isbn을 찾았을 때만 존재. 알라딘에도 없으면 생략되며, 사용자가 직접 입력하는 폴백으로 이어진다
 
     Genre:
       type: string
@@ -1863,14 +1903,14 @@ components:
             message: 인증이 필요합니다.
 
     InvalidSearchParameter:
-      description: 제목과 저자 검색 조건이 모두 없음
+      description: isbn이 없거나 형식(ISBN-10/13)에 맞지 않음
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
           example:
             code: INVALID_SEARCH_PARAMETER
-            message: 제목 또는 저자 검색 조건이 필요합니다.
+            message: 유효한 isbn이 필요합니다.
 
     AladinApiError:
       description: 알라딘 API 호출 오류

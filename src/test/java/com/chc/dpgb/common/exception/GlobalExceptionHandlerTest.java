@@ -35,7 +35,7 @@ class GlobalExceptionHandlerTest {
         mockMvc.perform(get("/global-exception-handler-test/bad-request").with(jwt()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_SEARCH_PARAMETER"))
-                .andExpect(jsonPath("$.message").value("제목 또는 저자 검색 조건이 필요합니다."));
+                .andExpect(jsonPath("$.message").value("유효한 isbn이 필요합니다."));
     }
 
     @Test

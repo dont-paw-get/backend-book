@@ -25,7 +25,9 @@ import com.chc.dpgb.common.exception.InvalidReorderTargetException;
 import com.chc.dpgb.common.exception.InvalidShelfTargetException;
 import com.chc.dpgb.common.exception.LibraryBookAccessDeniedException;
 import com.chc.dpgb.common.exception.LibraryBookNotFoundException;
+import com.chc.dpgb.library.domain.Genre;
 import com.chc.dpgb.library.domain.LibraryBook;
+import com.chc.dpgb.library.domain.ReadingStatus;
 import com.chc.dpgb.library.domain.Shelf;
 import com.chc.dpgb.library.domain.ShelfRank;
 
@@ -96,6 +98,38 @@ class LibraryBookServiceTest {
     }
 
     @Test
+    void shelfId를_지정하면_그_책장에_등록한다() {
+        stubSaveToReturnItsArgument();
+        Shelf shelf = Shelf.create(MEMBER_1, "소설 책장", false);
+        setShelfId(shelf, 7L);
+        when(shelfRepository.findById(7L)).thenReturn(Optional.of(shelf));
+        when(libraryBookRepository.findLastRanked(7L)).thenReturn(Optional.empty());
+
+        LibraryBook result = libraryBookService.createLibraryBook(
+                MEMBER_1, 7L, "제목", "저자", null, null, null, null, null, null, 100
+        );
+
+        assertThat(result.getShelfId()).isEqualTo(7L);
+    }
+
+    @Test
+    void 지정한_genre와_readingStatus로_등록한다() {
+        stubSaveToReturnItsArgument();
+        Shelf shelf = Shelf.create(MEMBER_1, "책장", false);
+        setShelfId(shelf, 1L);
+        when(shelfRepository.findById(1L)).thenReturn(Optional.of(shelf));
+        when(libraryBookRepository.findLastRanked(1L)).thenReturn(Optional.empty());
+
+        LibraryBook result = libraryBookService.createLibraryBook(
+                MEMBER_1, 1L, "제목", "저자", null, Genre.LITERARY_FICTION, null, null, null,
+                ReadingStatus.READING, 100
+        );
+
+        assertThat(result.getGenre()).isEqualTo(Genre.LITERARY_FICTION);
+        assertThat(result.getReadingStatus()).isEqualTo(ReadingStatus.READING);
+    }
+
+    @Test
     void 존재하지_않는_shelfId를_지정하면_400() {
         when(shelfRepository.findById(99L)).thenReturn(Optional.empty());
 
@@ -120,7 +154,8 @@ class LibraryBookServiceTest {
         Shelf shelf = Shelf.create(MEMBER_1, "책장", false);
         setShelfId(shelf, 1L);
         when(shelfRepository.findById(1L)).thenReturn(Optional.of(shelf));
-        when(libraryBookRepository.existsByIsbn(MEMBER_1, "9788932917245")).thenReturn(true);
+        when(libraryBookRepository.findByMemberIdAndIsbn(MEMBER_1, "9788932917245"))
+                .thenReturn(Optional.of(book(1L, MEMBER_1, 1L, ShelfRank.initial())));
 
         assertThatThrownBy(() -> libraryBookService.createLibraryBook(
                 MEMBER_1, 1L, "제목", "저자", "9788932917245", null, null, null, null, null, 100

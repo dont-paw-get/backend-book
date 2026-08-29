@@ -41,8 +41,8 @@ class LibraryBookRepositoryJpaAdapter implements LibraryBookRepository {
     }
 
     @Override
-    public boolean existsByIsbn(UUID memberId, String isbn) {
-        return jpaRepository.existsByMemberIdAndIsbn(memberId, isbn);
+    public Optional<LibraryBook> findByMemberIdAndIsbn(UUID memberId, String isbn) {
+        return jpaRepository.findByMemberIdAndIsbn(memberId, isbn);
     }
 
     @Override

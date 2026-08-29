@@ -219,3 +219,86 @@ CLIAR-35 커밋(`74bb92a`) 이후 같은 세션에서 "swagger API 작성해" �
 커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
 
 다음 세션 시작 시: 이번 ADR-0009 구현(Librarian 축소, V6 마이그레이션, openapi.yaml/erd.dbml/DOMAIN.md 갱신)이 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. Member 서비스 쪽 DBML(대화로 다시 작성해 보여준 버전)은 이 저장소에 없으니, 사용자가 그 서비스의 실제 저장소에 반영했는지는 이 세션이 알 수 없다.
+
+## 2026-08-28: Book Discovery API를 title/author 검색에서 isbn 검색으로 전환 (CLIAR-161, ADR-0012)
+
+사용자가 "책 등록할 때 지금 책제목과 저자명 기준으로 알라딘 api를 찾고 있는데 기능 명세서가 바뀌었다 — isbn 기준으로 찾도록 하고, isbn 중복체크해서 기존에 존재하면 이미 저장된 책에 대한 데이터를 반환하도록 만들어. isbn 속성은 unique 값으로"라고 요청했다. 세션 시작 시 이미 `CLIAR-161-Book-정보-조회-isbn-기준으로-변경` 브랜치가 체크아웃되어 있어(원격에도 존재) 별도 브랜치를 만들지 않았다.
+
+구현 전에 기존 코드(`BookDiscoveryService`/`BookDiscoveryClient`/`AladinBookDiscoveryClient`/`LibraryBookService.createLibraryBook`)를 먼저 읽고, 문구가 모호한 지점 3가지를 `AskUserQuestion`으로 확인받았다: (1) title/author 파라미터는 완전히 제거하고 isbn 단일 필수 파라미터로 교체(권장안), (2) isbn 중복 확인은 등록(`createLibraryBook`) 시점이 아니라 검색(`/books/search`) 시점에 한다, (3) isbn 유일성 범위는 ADR-0007과 동일하게 회원별 유지(전역 아님, 권장안). 세 질문 모두 권장안대로 확정됐다. 이 설계를 `.harness/PLAN.md`에 적어 제시했고 사용자가 "이대로 진행해"로 승인했다.
+
+구현: `docs/api/openapi.yaml`(v0.9.0) — `searchBookInfo`의 `title`/`author` 파라미터를 `isbn`(필수)으로 교체, `BookSearchResponse`를 `books: ExternalBook[]`에서 `{alreadyRegistered, libraryBook?, book?}` 단일 결과 구조로 재설계, `InvalidSearchParameter` 응답 예시 메시지 갱신. `docs/api/decisions/0012-isbn-based-book-search.md`(ADR-0012) 신설, `docs/api/README.md` ADR 목록 갱신. `.harness/DOMAIN.md`의 "외부 도서 검색 → LibraryBook 생성 경계" 절과 "중복" 절 갱신(정책 자체는 불변, 노출 시점만 검색으로 앞당김).
+
+코드: `LibraryBookRepository.existsByIsbn(memberId, isbn): boolean`을 `findByMemberIdAndIsbn(memberId, isbn): Optional<LibraryBook>`로 확장(`LibraryBookJpaRepository`/`LibraryBookRepositoryJpaAdapter` 동반 변경) — `LibraryBookService.createLibraryBook`의 기존 409 체크와 신규 `BookDiscoveryService`가 이 메서드 하나를 공유한다. `BookDiscoveryClient.search(title, author): List<ExternalBook>`를 `lookup(isbn): Optional<ExternalBook>`로 교체하고 `AladinBookDiscoveryClient`가 알라딘 `ItemSearch.aspx` 대신 `ItemLookUp.aspx`(isbn 길이 10/13에 따라 `ItemIdType`을 `ISBN`/`ISBN13`으로 분기)를 호출하도록 재구현했다 — 기존 `AladinSearchResponse`/`AladinItem`/`AladinSubInfo` DTO와 `AuthorNameNormalizer`, "HTTP 200 + 바디 errorCode로 오류 판단" 패턴은 그대로 재사용했다. `BookDiscoveryService`가 `LibraryBookRepository`(library.application 포트)를 새로 의존하게 되어 discovery 패키지가 library 패키지를 단방향 참조하게 됐다(반대 방향 없음, 순환 없음) — `search(memberId, isbn)`이 먼저 서재를 조회해 있으면 알라딘을 호출하지 않고 신규 `BookSearchResult.alreadyRegistered(libraryBook)`를 반환하고, 없으면 `bookDiscoveryClient.lookup`으로 위임해 `found(book)`/`notFound()`를 반환한다. `BookDiscoveryController`가 다른 컨트롤러와 동일한 `@AuthenticationPrincipal Jwt` + `MemberIdResolver.resolve` 패턴으로 memberId를 얻도록 바뀌었다(이전엔 인증 principal을 쓰지 않았음). `discovery.web.dto.BookSearchResponse`가 `library.web.dto.LibraryBookDetailResponse`를 재사용해 `alreadyRegistered`일 때의 응답을 만든다.
+
+**라이브 검증을 하지 못했다는 점이 중요하다**: CLIAR-34 때는 `.env`의 `ALADIN_API_TTB_KEY`로 실제 알라딘 `ItemSearch`를 curl로 여러 번 호출해 응답 형태를 확인했지만, 이번 세션 시점엔 `.env`에 그 키 항목은 있으나 값이 비어 있어(`ALADIN_API_TTB_KEY=` 빈 문자열) `ItemLookUp.aspx`를 실제로 호출해보지 못했다. `ItemSearch`와 동일한 `{item: [...], errorCode, errorMessage}` 응답 래퍼를 갖는다는 문서 기반 가정으로 구현·테스트(fixture)를 작성했다 — 특히 "존재하지 않는 isbn을 조회하면 빈 `item` 배열인지, 아니면 `errorCode`가 오는지"를 확인하지 못한 채 "빈 배열"이라고 가정했다(후자라면 알라딘에 없는 책 검색이 502로 잘못 처리된다). `.harness/BACKLOG.md`에 TTBKey 확보 후 최우선으로 재검증할 항목으로 남겼다.
+
+테스트 갱신: `BookDiscoveryServiceTest`(Mockito로 재작성 — 이미 등록됨/알라딘에서 찾음/둘 다 없음 3분기 + isbn 공백·형식 오류 400), `BookDiscoveryControllerTest`(`@WebMvcTest`, JWT 인증 패턴 추가 + 3분기 + 400/401/502), `AladinBookDiscoveryClientTest`(`MockRestServiceServer`, isbn10/13 `ItemIdType` 분기 + 기존 errorCode/isbn13 우선순위 테스트를 lookup 방식으로 이식), `LibraryBookServiceTest`/`LibraryBookRepositoryTest`(mock/실제 호출을 `findByMemberIdAndIsbn`로 교체), `GlobalExceptionHandlerTest`(`InvalidSearchParameterException` 기본 메시지 변경 반영). `./gradlew compileJava compileTestJava compileIntegrationTestJava`, `./gradlew test`, `./gradlew check`(Docker Desktop을 이 세션에서 직접 기동시켜 실제 PostgreSQL Testcontainers로 검증) 전부 통과 확인. `docs/api/openapi.yaml`은 세션 스크래치패드의 파이썬 스크립트(`$ref` 무결성·중복 operationId·미사용 schema/response/parameter)로 재검증했다(operationId 26개, 이슈 없음) — 스크립트는 저장소에 커밋하지 않았다.
+
+`.harness/PLAN.md`에서 이번 섹션 제거(미완료 계획 없음 상태로 복귀), `.harness/STATE.md`에 단계 요약 반영, `.harness/BACKLOG.md`에 라이브 검증 미완료 항목 추가·오래된 "최대 10건 검색 결과" 문구 정리.
+
+커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
+
+다음 세션 시작 시: 이번 CLIAR-161 구현(isbn 기반 검색, `BookSearchResult`, `findByMemberIdAndIsbn`, ADR-0012, 관련 테스트 전체)이 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. `ALADIN_API_TTB_KEY`가 준비되면 `ItemLookUp.aspx` 라이브 검증(특히 "찾지 못함" 케이스가 빈 배열인지 errorCode인지)을 최우선으로 하고, 필요하면 `AladinBookDiscoveryClient.lookup`/`AladinBookDiscoveryClientTest`를 실제 응답에 맞게 수정한다.
+
+## 2026-08-28 (계속): 알라딘 API 키 확보 후 라이브 검증, errorCode 8 처리 버그 발견·수정
+
+같은 세션에서 사용자가 `.env`의 `ALADIN_API_TTB_KEY`를 채우고 "알라딘 API 키 추가했으니 테스트해봐"라고 요청했다. 값이 비어있지 않은지만 길이로 먼저 확인한 뒤(값 자체는 노출하지 않음), curl로 실제 `ItemLookUp.aspx`를 세 가지 케이스로 호출했다: (1) isbn13(9788932917245, 어린 왕자) 조회, (2) isbn10(8932917248) 조회, (3) 존재하지 않는 isbn13(9780000000002) 조회.
+
+(1)/(2)는 예상대로 `ItemSearch`와 동일한 `{item: [...], ...}` 래퍼로 응답했다. **(3)에서 직전 세션의 가정이 틀렸다는 게 드러났다** — 빈 `item` 배열이 아니라 `{"errorCode":8,"errorMessage":"키에 해당하는 상품이 존재하지 않습니다."}`를 반환했다. 직전 세션에 작성한 `AladinBookDiscoveryClient.lookup`은 모든 `errorCode`를 무조건 `AladinApiException`(502)으로 처리하고 있었으므로, 이 상태로는 "알라딘에 없는 책 검색"(정상적인 폴백 흐름)이 매번 502 서버 오류로 나갔을 것 — `.harness/BACKLOG.md`에 남겨뒀던 라이브 검증 필요 항목이 실제로 버그였음을 확인한 것이다.
+
+수정: `errorCode == 8`일 때만 "찾지 못함"(`Optional.empty()`)으로 처리하고, 그 외 `errorCode`는 기존대로 502로 유지하도록 `AladinBookDiscoveryClient.lookup`을 고쳤다(상수 `ERROR_CODE_ITEM_NOT_FOUND = 8` + 왜 8만 예외인지 설명하는 주석 추가). `AladinBookDiscoveryClientTest`의 fixture를 라이브로 캡처한 실제 응답(어린 왕자 전체 필드)과 `errorCode: 8` 응답으로 교체해 "찾지 못함"과 "진짜 API 오류"(errorCode 4 등)를 구분하는 테스트로 재작성했다.
+
+`.harness/STATE.md`(CLIAR-161 항목의 "라이브 검증 미완료" 문단을 검증 완료+발견한 문제로 교체), `.harness/ARCHITECTURE.md`(`AladinBookDiscoveryClient`/테스트 설명 갱신), `.harness/BACKLOG.md`(재검증 필요 항목 제거 — 이제 완료됨) 반영. `./gradlew compileJava compileTestJava test`, `./gradlew check`(Docker Desktop 기동, 실제 PostgreSQL) 전체 재통과 확인.
+
+앱을 실제로 띄워 HTTP로 `/api/v1/books/search`를 호출하는 end-to-end 테스트는 하지 않았다 — 모든 endpoint가 인증을 요구하는데(`SecurityConfig`) 실제 Cognito User Pool이 없어 유효한 JWT를 발급할 방법이 없기 때문이다(기존에도 동일한 제약, `BACKLOG.md`의 "실제 Cognito 연동 재검증" 항목 참조). 알라딘 쪽은 직접 curl로, 애플리케이션 로직 쪽은 `MockRestServiceServer` 기반 슬라이스 테스트로 검증하는 것으로 대신했다.
+
+커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
+
+다음 세션 시작 시: 이번 라이브 검증·버그 수정을 포함한 CLIAR-161 전체가 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다.
+
+## 2026-08-29: 서재 책 등록의 genre/readingStatus/shelfId — 원인 규명, Swagger 예시 분리, 회귀 테스트
+
+사용자가 "책 등록 API에서 `genre`/`readingStatus`가 입력을 안 받고 디폴트로 내보내고 있다, 등록 시 함께 입력받아 DB에 저장하면 좋겠다. `shelfId`도 없으면 기본 책장, 있으면 해당 책장으로 배치"라고 요청했다.
+
+먼저 구현하지 않고 코드를 확인했더니 **요청한 세 가지가 이미 전부 구현되어 있었다** — `CreateLibraryBookRequest`에 세 필드가 있고, `LibraryBookController`가 그대로 넘기고, `LibraryBookService.resolveShelf`가 `shelfId==null`이면 기본 책장을 get-or-create하며, `LibraryBook.register`가 `null`일 때만 `NONE`/`PLANNED`를 채우고, `V7` 마이그레이션에 `genre_type`/`book_reading_status` PostgreSQL enum 컬럼이 있다. `docs/api/openapi.yaml`의 `CreateLibraryBookRequest` 스키마에도 세 필드가 선택 필드로 이미 명세돼 있었다. 그래서 구현 대신 이 사실을 보고하고, 어떻게 관찰했는지(실제로 값을 보냈는지/안 보냈는지/배포 문서가 오래된 건지)를 되물었다.
+
+사용자가 "swagger 문서에 세 필드를 전부 넣은 버전과 빠진 버전 2개 예시를 넣어줘"라고 답하면서 **진짜 원인이 드러났다**: `createLibraryBook`의 요청 본문 `example`(단수)에 `genre`/`readingStatus`/`shelfId`가 아예 없어서, Swagger UI "Try it out"이 그 예시를 그대로 채워 보내면 언제나 서버 기본값으로만 등록됐던 것이다. 스키마가 아니라 예시가 문제였다. 단일 `example`을 이름 있는 `examples` 2종으로 교체했다 — `전체_입력`(세 필드 모두 지정, 드롭다운 기본 선택)과 `선택_필드_생략`(기존 예시 그대로). 기존 `searchBookInfo` 응답 예시와 같은 컨벤션(한국어 키 + `summary`/`description`)을 따랐다. 스키마·서버 동작이 바뀌지 않아 `info.version`(0.9.0)은 올리지 않았고 ADR도 만들지 않았다.
+
+이어서 사용자가 "로컬 실행해서 swagger에 어떻게 뜨는지 확인해볼래"라고 해 실제로 띄워 검증했다: Docker Desktop 기동 → `docker compose up -d postgres` → `./gradlew bootJar` → `.env` 주입 + `SPRING_PROFILES_ACTIVE=local`로 `java -jar` 실행 → `/health` 200. `GET /openapi.yaml`이 편집한 예시 2개를 순서대로 서빙하는 것을 확인했다(`processResources`의 `docs/api/openapi.yaml` → `static/` 복사 경로 정상). 그 다음 헤드리스 Chrome + CDP(노드 v24 내장 `WebSocket`으로 직접 구현, 의존성 설치 없음)로 `/docs/index.html`을 열어 `createLibraryBook`을 실제 마우스 이벤트로 펼치고 `Examples:` 드롭다운(`<select class="examples-select-element">`)에 두 옵션이 뜨는 것과 각 예시의 렌더링을 스크린샷으로 확인했다. 참고로 Swagger UI는 `.click()`(프로그램적 클릭)으로는 오퍼레이션이 펼쳐지지 않아 `Input.dispatchMouseEvent`가 필요했고, `examples-select`의 옵션 텍스트는 예시 키가 아니라 `summary` 값으로 표시된다.
+
+사용자가 먼저 커밋을 요청해 `develop`에 직접 커밋했다가(브랜치 정책상 티켓 브랜치가 맞지만 티켓이 없어 `AskUserQuestion`으로 물었고 사용자가 "develop 직접 커밋"을 선택), 곧바로 "커밋 되돌리고 회귀 테스트까지 해서 한꺼번에 커밋"을 요청해 `git reset --soft HEAD~1`로 되돌린 뒤 테스트를 추가했다.
+
+회귀 테스트는 4개 계층에 넣었다(기존에는 이 pass-through를 검증하는 테스트가 하나도 없었다 — 컨트롤러 등록 테스트가 전부 `any()` 매처를 쓰고 본문에 세 필드를 넣지 않았고, 서비스/리포지토리 테스트는 등록 시 `genre`/`readingStatus`를 항상 `null`로만 호출했다):
+
+- `LibraryBookTest`: 값을 지정하면 기본값으로 덮이지 않는다 (기존엔 "생략하면 기본값" 테스트만 있었다)
+- `LibraryBookServiceTest`: 지정한 `shelfId`의 책장에 등록 / 지정한 `genre`·`readingStatus`가 결과에 반영
+- `LibraryBookControllerTest`: JSON 본문 → 서비스 인자 → HTTP 응답. 세 필드에만 `eq` 매처를 걸어 컨트롤러가 값을 흘리면 스텁이 매칭되지 않아 실패하게 했고, 응답 본문(`$.shelfId`/`$.genre`/`$.readingStatus`)까지 검증해 mock `verify()` 대신 관찰 가능한 결과로 확인한다. 헬퍼 `book()`의 인라인 리플렉션을 `withBookId()`로 추출하고 `book(shelfId, genre, readingStatus)` 오버로드를 추가했다.
+- `LibraryBookRepositoryTest`(통합): 지정값과 기본값 각각이 PostgreSQL enum 컬럼에 저장되고 `entityManager.clear()`(신규 `@PersistenceContext` 주입) 후 다시 읽힌다
+
+**테스트가 실제로 실패할 수 있는지 확인했다** — `LibraryBookController`가 `genre`/`readingStatus` 자리에 `null`을 넘기도록 일부러 깨뜨리자 새 컨트롤러 테스트만 FAILED가 났고, `git checkout --`으로 원복했다. `./gradlew check`(실제 PostgreSQL Testcontainers) 전체 통과.
+
+`.harness/STATE.md`에 단계 한 줄 요약, `.harness/BACKLOG.md`에 미결 항목(201 응답 예시를 요청 예시와 짝 맞출지) 추가. `PLAN.md`는 이번 작업이 같은 세션에서 끝나 미완료 항목이 없어 그대로 뒀다.
+
+**다음 세션 시작 시**: 이 작업(openapi 예시 2종 + 4계층 회귀 테스트 + STATE/BACKLOG 갱신)이 한 커밋으로 `develop`에 올라가 있다. push는 하지 않았으니 필요하면 사용자에게 확인할 것. 미결 항목은 `BACKLOG.md`의 201 응답 예시 건 하나다. 로컬에 앱(`java -jar`)과 `docker compose` postgres가 떠 있는 채로 세션이 끝났을 수 있으니 필요하면 정리한다.
+
+## 2026-08-30: prod EKS 배포 CrashLoopBackOff 원인 규명과 멀티아키 이미지 전환 (CLIAR-112)
+
+사용자가 "prod 환경 배포를 마무리하려는데 ArgoCD에서 Degraded가 떠 있다, `backend-book` 파드가 CrashLoopBackOff(exit 255)이고 svc/ing는 정상인데 deploy 단계에서 문제가 난다"며 파드/Deployment 상태를 붙여 요청했다. 세션 시작 시 브랜치는 `develop`이었고, 계획 확정 후 사용자가 직접 `CLIAR-112-Book-Server-EKS-prod-배포` 브랜치를 만들어 옮겨둔 상태로 구현을 시작했다.
+
+세션 앞부분은 AWS CLI 로그인 질문이었다. `~/.aws`에 `default`(장기 IAM 키)와 `mfa`(임시 세션) 두 프로필이 있고, `mfa` 프로필이 `ExpiredToken`으로 만료된 상태였다. MFA 디바이스는 두 개 등록되어 있는데 CLI에서 쓸 수 있는 건 가상 OTP(`arn:aws:iam::594532711953:mfa/otp-cli`)뿐이고 나머지 하나는 U2F 보안키(콘솔 전용)다. PowerShell용 `sts get-session-token` 재발급 절차를 안내했고 사용자가 갱신했다.
+
+**원인 규명 과정**: prod 클러스터가 kubeconfig에 없어 `aws eks update-kubeconfig --name dpyb-prod --alias dpyb-prod`로 컨텍스트를 추가했다(사용자 머신의 `~/.kube/config` 변경). `kubectl logs --previous`로 크래시한 이전 컨테이너 로그를 보니 단 한 줄, `exec /opt/java/openjdk/bin/java: exec format error`였다 — Spring 배너도 스택트레이스도 없다는 건 JVM이 exec 시점에 실패했다는 뜻이라 애플리케이션/설정 문제가 아니다. 이어서 세 가지를 교차 확인했다: (1) `dpyb-prod` 노드는 전부 arm64(`workload=book` 전용 노드는 `t4g.medium`, 나머지 `c6g.large`), (2) ECR의 prod 이미지가 manifest list가 아닌 `manifest.v2` **단일 아키텍처**, (3) CI는 `ubuntu-latest`(amd64)에서 `docker build`를 그냥 실행. → amd64 이미지를 arm64 노드에서 돌린 것이 확정.
+
+**dev가 멀쩡했던 이유도 밝혀 기록해뒀다**: `dpyb-dev`는 amd64(`r5a`/`c5a`)와 arm64(`c6g`)가 섞여 있고 dev overlay에는 `nodeSelector`가 없어서, dev 파드가 우연히 amd64 노드(`i-0a72686b6f55953e8`)에 착지했을 뿐이다. Karpenter consolidation·노드 교체·amd64 여유 부족 중 하나만 걸리면 dev도 같은 증상으로 죽는다. 사용자가 "dev는 혼합이라 문제없고 prod는 arm64만이라 문제냐"고 확인했을 때, "dev는 문제없는 게 아니라 우연히 안 걸린 것"이라는 점을 명확히 짚었다 — 이것이 NodePool 고정 대신 멀티아키를 택한 핵심 근거다.
+
+`AskUserQuestion`으로 세 가지를 확정받았다: 해결 방식은 **멀티아키 이미지**(대안이던 "prod NodePool을 amd64로 고정"은 긴급 롤백 레버로만 남김), 브랜치는 사용자가 이미 만들어 옮김, 수행 범위는 **커밋까지**(push·PR·main 병합은 사용자가 직접).
+
+**구현**: `Dockerfile`의 빌드 스테이지를 `FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk AS build`로 고정했다 — jar이 아키텍처 중립이라 Gradle은 러너 네이티브로 한 번만 돌고, 런타임 스테이지(`eclipse-temurin:21-jre`)만 타깃 아키텍처를 따라간다. 런타임 스테이지에 `RUN`이 없으므로 QEMU 에뮬레이션 실행 자체가 없어 멀티아키 비용이 사실상 0이다. `.github/workflows/build-push-ecr.yml`은 `setup-qemu-action`/`setup-buildx-action` 추가 후 `docker build`/`docker tag`/`docker push` 스크립트를 `docker/build-push-action@v6`(`platforms: linux/amd64,linux/arm64`, `push: true`, `provenance: false`)로 교체했다. **buildx 멀티플랫폼 빌드는 로컬에 이미지가 남지 않아 `docker tag`를 쓸 수 없다** — 그래서 push할 태그 전부를 "Resolve target by branch" 스텝이 `tags` 멀티라인 출력으로 계산해 넘기도록 함께 바꿨다(prod=SHA 1개, dev=SHA + `develop-latest`).
+
+검증: `eclipse-temurin:21-jre`에 `linux/arm64/v8` 변형이 실제로 있는지 `docker buildx imagetools inspect`로 확인(Docker 데몬 없이 레지스트리 직접 조회로 됐다). 태그 계산 셸 로직은 임시 디렉터리에서 `main`/`develop` 양쪽으로 시뮬레이션해 출력이 의도대로인지 확인. 워크플로우 YAML은 파이썬 `yaml.safe_load`로 파싱 검증. `./gradlew test` 통과(Java 코드 변경은 없다). **실제 멀티아키 빌드는 로컬에서 돌려보지 못했다** — Docker 데몬이 꺼져 있었고, 진짜 검증은 CI에서 나므로 그쪽으로 미뤘다.
+
+문서: `.harness/ARCHITECTURE.md` 배포 절에 노드 아키텍처 현황(prod 전부 arm64/Graviton, dev 혼합)·멀티아키 CI·Dockerfile 2-스테이지 구조 반영, `.harness/DECISIONS.md` 최상단에 결정과 기각한 대안 2종 기록, `.harness/STATE.md`에 단계 한 줄 요약, `.harness/PLAN.md`를 배포·검증 잔여 단계로 재작성(긴급 롤백용 NodePool amd64 고정 YAML 스니펫 포함).
+
+**다음 세션 시작 시**: 이 작업은 `CLIAR-112-Book-Server-EKS-prod-배포` 브랜치에 커밋만 되어 있고 **push되지 않았다**. `.harness/PLAN.md`의 잔여 체크리스트(push → develop PR → main 병합 → ECR 매니페스트가 아키텍처 2개인지 확인 → prod 파드 `2/2 Running` → 잔여 ReplicaSet 정리 → ArgoCD Healthy → `/health` 200)를 이어서 진행한다. prod ECR은 IMMUTABLE이라 기존 SHA 재push가 아닌 **새 병합 커밋 SHA**로 나가야 한다.
+
+**중요한 미확인 사항**: prod에서 JVM이 지금까지 한 번도 기동한 적이 없으므로, 아키텍처를 고치면 그 다음 단계 문제가 처음 드러날 수 있다. prod Secret에 `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`/`ALADIN_API_TTB_KEY` 4개 키가 존재하는 것까지만 확인했고 **RDS 실제 접속·Flyway 마이그레이션·Cognito 검증은 전부 미확인**이다. 파드가 뜬 직후 로그를 반드시 확인할 것 — 이번엔 죽더라도 스택트레이스가 남는다.
