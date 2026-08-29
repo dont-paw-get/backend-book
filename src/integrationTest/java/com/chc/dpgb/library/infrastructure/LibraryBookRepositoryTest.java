@@ -11,14 +11,22 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+
 import com.chc.dpgb.RepositoryIntegrationTestSupport;
+import com.chc.dpgb.library.domain.Genre;
 import com.chc.dpgb.library.domain.LibraryBook;
+import com.chc.dpgb.library.domain.ReadingStatus;
 import com.chc.dpgb.library.domain.Shelf;
 
 class LibraryBookRepositoryTest extends RepositoryIntegrationTestSupport {
 
     private static final UUID MEMBER_1 = UUID.randomUUID();
     private static final UUID MEMBER_2 = UUID.randomUUID();
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Autowired
     private LibraryBookJpaRepository libraryBookRepository;
@@ -39,6 +47,36 @@ class LibraryBookRepositoryTest extends RepositoryIntegrationTestSupport {
 
         assertThat(found).isPresent();
         assertThat(found.get().getTitle()).isEqualTo("어린 왕자");
+    }
+
+    @Test
+    void 지정한_genre와_readingStatus가_DB에_저장되고_다시_조회된다() {
+        Long shelfId = shelf(MEMBER_1).getShelfId();
+        LibraryBook saved = libraryBookRepository.saveAndFlush(LibraryBook.register(
+                MEMBER_1, shelfId, "m", "어린 왕자", "생텍쥐페리", "9788932917245", Genre.LITERARY_FICTION,
+                "열린책들", null, null, ReadingStatus.READING, 160
+        ));
+        // 1차 캐시가 아니라 PostgreSQL enum 컬럼에 실제로 저장된 값을 읽는다
+        entityManager.clear();
+
+        LibraryBook found = libraryBookRepository.findById(saved.getBookId()).orElseThrow();
+
+        assertThat(found.getGenre()).isEqualTo(Genre.LITERARY_FICTION);
+        assertThat(found.getReadingStatus()).isEqualTo(ReadingStatus.READING);
+    }
+
+    @Test
+    void genre와_readingStatus를_생략하면_기본값이_DB에_저장된다() {
+        Long shelfId = shelf(MEMBER_1).getShelfId();
+        LibraryBook saved = libraryBookRepository.saveAndFlush(LibraryBook.register(
+                MEMBER_1, shelfId, "m", "어린 왕자", "생텍쥐페리", null, null, null, null, null, null, 160
+        ));
+        entityManager.clear();
+
+        LibraryBook found = libraryBookRepository.findById(saved.getBookId()).orElseThrow();
+
+        assertThat(found.getGenre()).isEqualTo(Genre.NONE);
+        assertThat(found.getReadingStatus()).isEqualTo(ReadingStatus.PLANNED);
     }
 
     @Test

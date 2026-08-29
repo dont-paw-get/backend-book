@@ -37,7 +37,9 @@ import com.chc.dpgb.common.exception.LibraryBookAccessDeniedException;
 import com.chc.dpgb.common.exception.LibraryBookNotFoundException;
 import com.chc.dpgb.library.application.LibraryBookService;
 import com.chc.dpgb.library.application.LibrarySortBy;
+import com.chc.dpgb.library.domain.Genre;
 import com.chc.dpgb.library.domain.LibraryBook;
+import com.chc.dpgb.library.domain.ReadingStatus;
 import com.chc.dpgb.security.SecurityConfig;
 
 @WebMvcTest(controllers = LibraryBookController.class)
@@ -60,10 +62,20 @@ class LibraryBookControllerTest {
     }
 
     private static LibraryBook book(Long shelfId, String shelfRank) {
-        LibraryBook book = LibraryBook.register(
+        return withBookId(LibraryBook.register(
                 MEMBER_1, shelfId, shelfRank, "어린 왕자", "생텍쥐페리", "9788932917245", null, "열린책들",
                 LocalDate.of(2015, 10, 20), "https://example.com/cover.jpg", null, 160
-        );
+        ));
+    }
+
+    private static LibraryBook book(Long shelfId, Genre genre, ReadingStatus readingStatus) {
+        return withBookId(LibraryBook.register(
+                MEMBER_1, shelfId, "m", "어린 왕자", "생텍쥐페리", "9788932917245", genre, "열린책들",
+                LocalDate.of(2015, 10, 20), "https://example.com/cover.jpg", readingStatus, 160
+        ));
+    }
+
+    private static LibraryBook withBookId(LibraryBook book) {
         try {
             var field = LibraryBook.class.getDeclaredField("bookId");
             field.setAccessible(true);
@@ -104,6 +116,31 @@ class LibraryBookControllerTest {
                                 {"title":"어린 왕자","author":"앙투안 드 생텍쥐페리"}
                                 """))
                 .andExpect(status().isCreated());
+    }
+
+    @Test
+    void createLibraryBook은_genre_readingStatus_shelfId를_요청대로_반영한다() throws Exception {
+        // 세 필드에만 eq를 걸어, 컨트롤러가 요청 값을 그대로 서비스로 넘길 때만 스텁이 매칭되게 한다
+        when(libraryBookService.createLibraryBook(
+                eq(MEMBER_1), eq(2L), any(), any(), any(), eq(Genre.LITERARY_FICTION), any(), any(), any(),
+                eq(ReadingStatus.READING), any()
+        )).thenAnswer(invocation -> book(
+                invocation.getArgument(1), invocation.getArgument(5), invocation.getArgument(9)
+        ));
+
+        mockMvc.perform(post("/api/v1/library/books")
+                        .with(member1Jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title":"어린 왕자","author":"앙투안 드 생텍쥐페리","isbn":"9788932917245",
+                                 "genre":"LITERARY_FICTION","publisher":"열린책들","publishedDate":"2015-10-20",
+                                 "totalPages":160,"coverUrl":"https://example.com/cover.jpg",
+                                 "readingStatus":"READING","shelfId":2}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.shelfId").value(2))
+                .andExpect(jsonPath("$.genre").value("LITERARY_FICTION"))
+                .andExpect(jsonPath("$.readingStatus").value("READING"));
     }
 
     @Test

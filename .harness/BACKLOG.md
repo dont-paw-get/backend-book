@@ -10,3 +10,4 @@
 - `librarian_level`(레벨별 필요 경험치 정책) 값은 `level=1, required_experience=0` 최소 시드만 있다(ADR-0011) — 실제 레벨 구간/필요 경험치 값을 게임 기획이 정해지면 시드를 채운다.
 - 사서 경험치 획득 트리거(무엇을 하면 경험치가 오르는지)와 레벨업 시점의 부수효과는 아직 설계하지 않았다(ADR-0011로 스키마/CRUD만 확정, 게임 로직은 범위 밖) — 설계되면 `LibrarianLevel` JPA 엔티티도 함께 추가한다.
 - `k8s/overlays/prod/configmap-patch.yaml`의 `AUTH_ISSUER_URI`/`AUTH_APP_CLIENT_ID`가 dev overlay와 동일한 User Pool(`ap-northeast-2_y1mKz50El`)을 가리킨다 — 2026-08-27 prod CD 파이프라인 검증을 위해 의도적으로 공용한 것이므로, 상용 전용 User Pool이 준비되면 prod overlay만 그 값으로 교체한다.
+- `createLibraryBook`의 201 응답 예시는 `genre: NONE`/`readingStatus: PLANNED` 하나뿐이라, 요청 예시 `전체_입력`(`LITERARY_FICTION`/`READING`)과 나란히 보면 "값을 보내도 기본값으로 돌아온다"처럼 읽힌다 — 요청 예시와 짝을 맞춰 응답 예시도 2종으로 나눌지 미정(사용자 확인 대기)

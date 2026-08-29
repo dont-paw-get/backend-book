@@ -65,6 +65,8 @@
 
   검증: `./gradlew check`(Docker Desktop 기동, 실제 PostgreSQL) 전체 통과 — `BookDiscoveryServiceTest`(Mockito, 이미 등록됨/알라딘에서 찾음/둘 다 없음 3분기 + isbn 형식 검증), `BookDiscoveryControllerTest`(`@WebMvcTest`, 인증 패턴 추가), `AladinBookDiscoveryClientTest`(`MockRestServiceServer`, isbn10/13 분기 + errorCode 8 "찾지 못함" 처리 포함), `LibraryBookServiceTest`/`LibraryBookRepositoryTest`(`existsByIsbn` mock/호출을 `findByMemberIdAndIsbn`로 교체) 갱신.
 
+- 서재 책 등록의 genre/readingStatus/shelfId 입력 경로 문서화·회귀 테스트(티켓 없음): `createLibraryBook`의 요청 본문 예시가 세 필드를 모두 빠뜨리고 있어 Swagger UI에서 그대로 전송하면 항상 서버 기본값(`NONE`/`PLANNED`/기본 책장)으로만 등록되던 문제를 잡았다. `docs/api/openapi.yaml`의 단일 `example`을 이름 있는 `examples` 2종(`전체_입력` 기본 선택 / `선택_필드_생략`)으로 교체했다 — 스키마·서버 동작은 변경 없음(`info.version` 유지). 서버는 원래부터 세 필드를 받아 저장하고 있었고(컨트롤러→서비스→엔티티→PostgreSQL enum 컬럼), 이를 못 박는 테스트가 어느 계층에도 없던 것이 실제 빈틈이었다. 4개 계층에 회귀 테스트를 추가했다: `LibraryBookTest`(값 지정 시 기본값으로 덮이지 않음), `LibraryBookServiceTest`(지정한 `shelfId` 책장에 등록 / 지정한 `genre`·`readingStatus` 반영), `LibraryBookControllerTest`(JSON 본문 → 서비스 인자 → HTTP 응답까지 전달 — 세 필드에만 `eq` 매처를 걸어 배선이 깨지면 스텁이 매칭되지 않게 함), `LibraryBookRepositoryTest`(지정값/기본값이 PostgreSQL enum 컬럼에 저장되고 `entityManager.clear()` 후 재조회됨). 컨트롤러 배선을 일부러 `null`로 깨뜨려 새 테스트만 실패하는 것을 확인한 뒤 원복했다. 로컬 실행(local 프로파일 + Docker PostgreSQL)으로 `/openapi.yaml` 서빙과 Swagger UI의 `Examples` 드롭다운 렌더링을 실물 확인했고, `./gradlew check`(실제 PostgreSQL) 전체 통과.
+
 ## 미완료 / 진행 중
 
 `.harness/PLAN.md` 참조.

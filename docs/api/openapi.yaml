@@ -114,14 +114,36 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateLibraryBookRequest"
-            example:
-              title: 어린 왕자
-              author: 앙투안 드 생텍쥐페리
-              isbn: "9788932917245"
-              publisher: 열린책들
-              publishedDate: "2015-10-20"
-              totalPages: 160
-              coverUrl: https://example.com/covers/9788932917245.jpg
+            examples:
+              전체_입력:
+                summary: genre/readingStatus/shelfId까지 모두 지정
+                description: |
+                  보낸 값이 그대로 저장된다 — 서버 기본값으로 덮어쓰지 않는다.
+                  `shelfId`는 로그인 사용자 소유의 책장이어야 한다(아니면 400).
+                value:
+                  title: 어린 왕자
+                  author: 앙투안 드 생텍쥐페리
+                  isbn: "9788932917245"
+                  genre: LITERARY_FICTION
+                  publisher: 열린책들
+                  publishedDate: "2015-10-20"
+                  totalPages: 160
+                  coverUrl: https://example.com/covers/9788932917245.jpg
+                  readingStatus: READING
+                  shelfId: 1
+              선택_필드_생략:
+                summary: genre/readingStatus/shelfId 생략 — 서버 기본값 적용
+                description: |
+                  `genre`는 `NONE`, `readingStatus`는 `PLANNED`로 저장되고
+                  사용자의 기본 책장에 등록된다.
+                value:
+                  title: 어린 왕자
+                  author: 앙투안 드 생텍쥐페리
+                  isbn: "9788932917245"
+                  publisher: 열린책들
+                  publishedDate: "2015-10-20"
+                  totalPages: 160
+                  coverUrl: https://example.com/covers/9788932917245.jpg
       responses:
         "201":
           description: 서재 책 등록 성공

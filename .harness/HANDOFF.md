@@ -255,3 +255,28 @@ CLIAR-35 커밋(`74bb92a`) 이후 같은 세션에서 "swagger API 작성해" �
 커밋 여부는 아직 사용자에게 확인받지 않았다 — 다음 행동 전에 물어볼 것.
 
 다음 세션 시작 시: 이번 라이브 검증·버그 수정을 포함한 CLIAR-161 전체가 커밋됐는지 git log로 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다.
+
+## 2026-08-29: 서재 책 등록의 genre/readingStatus/shelfId — 원인 규명, Swagger 예시 분리, 회귀 테스트
+
+사용자가 "책 등록 API에서 `genre`/`readingStatus`가 입력을 안 받고 디폴트로 내보내고 있다, 등록 시 함께 입력받아 DB에 저장하면 좋겠다. `shelfId`도 없으면 기본 책장, 있으면 해당 책장으로 배치"라고 요청했다.
+
+먼저 구현하지 않고 코드를 확인했더니 **요청한 세 가지가 이미 전부 구현되어 있었다** — `CreateLibraryBookRequest`에 세 필드가 있고, `LibraryBookController`가 그대로 넘기고, `LibraryBookService.resolveShelf`가 `shelfId==null`이면 기본 책장을 get-or-create하며, `LibraryBook.register`가 `null`일 때만 `NONE`/`PLANNED`를 채우고, `V7` 마이그레이션에 `genre_type`/`book_reading_status` PostgreSQL enum 컬럼이 있다. `docs/api/openapi.yaml`의 `CreateLibraryBookRequest` 스키마에도 세 필드가 선택 필드로 이미 명세돼 있었다. 그래서 구현 대신 이 사실을 보고하고, 어떻게 관찰했는지(실제로 값을 보냈는지/안 보냈는지/배포 문서가 오래된 건지)를 되물었다.
+
+사용자가 "swagger 문서에 세 필드를 전부 넣은 버전과 빠진 버전 2개 예시를 넣어줘"라고 답하면서 **진짜 원인이 드러났다**: `createLibraryBook`의 요청 본문 `example`(단수)에 `genre`/`readingStatus`/`shelfId`가 아예 없어서, Swagger UI "Try it out"이 그 예시를 그대로 채워 보내면 언제나 서버 기본값으로만 등록됐던 것이다. 스키마가 아니라 예시가 문제였다. 단일 `example`을 이름 있는 `examples` 2종으로 교체했다 — `전체_입력`(세 필드 모두 지정, 드롭다운 기본 선택)과 `선택_필드_생략`(기존 예시 그대로). 기존 `searchBookInfo` 응답 예시와 같은 컨벤션(한국어 키 + `summary`/`description`)을 따랐다. 스키마·서버 동작이 바뀌지 않아 `info.version`(0.9.0)은 올리지 않았고 ADR도 만들지 않았다.
+
+이어서 사용자가 "로컬 실행해서 swagger에 어떻게 뜨는지 확인해볼래"라고 해 실제로 띄워 검증했다: Docker Desktop 기동 → `docker compose up -d postgres` → `./gradlew bootJar` → `.env` 주입 + `SPRING_PROFILES_ACTIVE=local`로 `java -jar` 실행 → `/health` 200. `GET /openapi.yaml`이 편집한 예시 2개를 순서대로 서빙하는 것을 확인했다(`processResources`의 `docs/api/openapi.yaml` → `static/` 복사 경로 정상). 그 다음 헤드리스 Chrome + CDP(노드 v24 내장 `WebSocket`으로 직접 구현, 의존성 설치 없음)로 `/docs/index.html`을 열어 `createLibraryBook`을 실제 마우스 이벤트로 펼치고 `Examples:` 드롭다운(`<select class="examples-select-element">`)에 두 옵션이 뜨는 것과 각 예시의 렌더링을 스크린샷으로 확인했다. 참고로 Swagger UI는 `.click()`(프로그램적 클릭)으로는 오퍼레이션이 펼쳐지지 않아 `Input.dispatchMouseEvent`가 필요했고, `examples-select`의 옵션 텍스트는 예시 키가 아니라 `summary` 값으로 표시된다.
+
+사용자가 먼저 커밋을 요청해 `develop`에 직접 커밋했다가(브랜치 정책상 티켓 브랜치가 맞지만 티켓이 없어 `AskUserQuestion`으로 물었고 사용자가 "develop 직접 커밋"을 선택), 곧바로 "커밋 되돌리고 회귀 테스트까지 해서 한꺼번에 커밋"을 요청해 `git reset --soft HEAD~1`로 되돌린 뒤 테스트를 추가했다.
+
+회귀 테스트는 4개 계층에 넣었다(기존에는 이 pass-through를 검증하는 테스트가 하나도 없었다 — 컨트롤러 등록 테스트가 전부 `any()` 매처를 쓰고 본문에 세 필드를 넣지 않았고, 서비스/리포지토리 테스트는 등록 시 `genre`/`readingStatus`를 항상 `null`로만 호출했다):
+
+- `LibraryBookTest`: 값을 지정하면 기본값으로 덮이지 않는다 (기존엔 "생략하면 기본값" 테스트만 있었다)
+- `LibraryBookServiceTest`: 지정한 `shelfId`의 책장에 등록 / 지정한 `genre`·`readingStatus`가 결과에 반영
+- `LibraryBookControllerTest`: JSON 본문 → 서비스 인자 → HTTP 응답. 세 필드에만 `eq` 매처를 걸어 컨트롤러가 값을 흘리면 스텁이 매칭되지 않아 실패하게 했고, 응답 본문(`$.shelfId`/`$.genre`/`$.readingStatus`)까지 검증해 mock `verify()` 대신 관찰 가능한 결과로 확인한다. 헬퍼 `book()`의 인라인 리플렉션을 `withBookId()`로 추출하고 `book(shelfId, genre, readingStatus)` 오버로드를 추가했다.
+- `LibraryBookRepositoryTest`(통합): 지정값과 기본값 각각이 PostgreSQL enum 컬럼에 저장되고 `entityManager.clear()`(신규 `@PersistenceContext` 주입) 후 다시 읽힌다
+
+**테스트가 실제로 실패할 수 있는지 확인했다** — `LibraryBookController`가 `genre`/`readingStatus` 자리에 `null`을 넘기도록 일부러 깨뜨리자 새 컨트롤러 테스트만 FAILED가 났고, `git checkout --`으로 원복했다. `./gradlew check`(실제 PostgreSQL Testcontainers) 전체 통과.
+
+`.harness/STATE.md`에 단계 한 줄 요약, `.harness/BACKLOG.md`에 미결 항목(201 응답 예시를 요청 예시와 짝 맞출지) 추가. `PLAN.md`는 이번 작업이 같은 세션에서 끝나 미완료 항목이 없어 그대로 뒀다.
+
+**다음 세션 시작 시**: 이 작업(openapi 예시 2종 + 4계층 회귀 테스트 + STATE/BACKLOG 갱신)이 한 커밋으로 `develop`에 올라가 있다. push는 하지 않았으니 필요하면 사용자에게 확인할 것. 미결 항목은 `BACKLOG.md`의 201 응답 예시 건 하나다. 로컬에 앱(`java -jar`)과 `docker compose` postgres가 떠 있는 채로 세션이 끝났을 수 있으니 필요하면 정리한다.
