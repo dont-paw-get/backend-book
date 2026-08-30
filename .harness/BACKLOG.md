@@ -11,3 +11,14 @@
 - 사서 경험치 획득 트리거(무엇을 하면 경험치가 오르는지)와 레벨업 시점의 부수효과는 아직 설계하지 않았다(ADR-0011로 스키마/CRUD만 확정, 게임 로직은 범위 밖) — 설계되면 `LibrarianLevel` JPA 엔티티도 함께 추가한다.
 - `k8s/overlays/prod/configmap-patch.yaml`의 `AUTH_ISSUER_URI`/`AUTH_APP_CLIENT_ID`가 dev overlay와 동일한 User Pool(`ap-northeast-2_y1mKz50El`)을 가리킨다 — 2026-08-27 prod CD 파이프라인 검증을 위해 의도적으로 공용한 것이므로, 상용 전용 User Pool이 준비되면 prod overlay만 그 값으로 교체한다.
 - `createLibraryBook`의 201 응답 예시는 `genre: NONE`/`readingStatus: PLANNED` 하나뿐이라, 요청 예시 `전체_입력`(`LITERARY_FICTION`/`READING`)과 나란히 보면 "값을 보내도 기본값으로 돌아온다"처럼 읽힌다 — 요청 예시와 짝을 맞춰 응답 예시도 2종으로 나눌지 미정(사용자 확인 대기)
+- prod NAT Gateway가 단일 AZ(`public2-ap-northeast-2b`, `nat-0c14a04ce3a253648`)다 — 해당 AZ 장애 시 prod 전체 아웃바운드가 끊긴다. 런칭 시점에 AZ별 NAT 2개로 늘리고 각 private 라우팅 테이블이 같은 AZ의 NAT를 가리키게 한다(현재는 4개 테이블 모두 2b NAT를 가리킴). Karpenter가 2a에 노드를 띄우면 AZ 간 데이터 전송료도 발생한다(현 트래픽 규모에서는 무시 가능).
+- prod Aurora에 reader 인스턴스가 없다(2026-08-30 삭제) — writer 장애 시 페일오버가 수십 초에서 수 분으로 느려진다. 런칭 전에 Serverless v2 reader를 다시 추가한다.
+- prod Aurora Serverless v2 최소 용량이 0.5 ACU다 — 트래픽이 없는 기간에는 0 ACU(자동 일시정지)로 낮추면 컴퓨트 과금이 0이 된다. 단 재개에 십수 초가 걸려 첫 커넥션이 지연되므로, 배포 검증이 끝나고 안정된 뒤에 조정한다.
+- `logs`/`sts`/`secretsmanager` VPC 인터페이스 엔드포인트는 지금 고정비가 절감액보다 커서 추가하지 않았다(2026-08-30 결정) — 로그·시크릿 트래픽이 실제로 커지면 재검토한다.
+- dev Aurora 잔재 정리: `test` 데이터베이스(8MB, book 서비스 V6 시점 스키마와 `librarian` 시드 2행만 있는 초기 시험 흔적)는 `DROP DATABASE test;`로 삭제 가능하다(`postgres` 데이터베이스 자체는 기본 유지보수 DB라 삭제하면 안 된다). `postgres` 안의 빈 `alembic_version_auth` 드롭은 2026-08-30에 완료했다(`STATE.md`).
+- `CLAUDE.md`의 DB 정책은 "각 서비스는 자신만의 PostgreSQL 인스턴스·데이터베이스를 소유"라고 인스턴스까지 명시하지만, 확정된 방향은 같은 Aurora 클러스터 안에서 데이터베이스만 분리하는 것이다(2026-08-30 결정) — 문서 문구를 현실에 맞게 조정할지, 장기적으로 클러스터까지 분리할지 미정.
+- prod `dpyb-auth` 네임스페이스의 파드 3개가 모두 `Pending`이고 그중 둘은 이미지 태그가 `placeholder-set-by-ci`다(2026-08-30 관찰) — book 서비스 소관은 아니지만 prod 전체를 마무리하려면 auth 담당자에게 공유가 필요하다.
+- 계정 내 `dpgy-infra-rca-agent:latest` 이미지가 amd64 단독이라 arm64 노드에서 `exec format error`로 뜨지 않는다(2026-08-30 확인) — book이 겪은 것과 같은 문제이므로 해당 팀에 공유한다.
+- prod Aurora `admin` 비밀번호를 교체해야 한다 — 2026-08-30 설정 과정에서 PowerShell 인용 문제로 실패한 `kubectl patch` 에러 메시지에 평문이 출력되어 세션 스크롤백에 남았다. dev의 `admin`과는 이미 다른 값이지만, 노출된 값이므로 배포가 안정된 뒤 교체한다. 교체 시 psql `\password`(클라이언트에서 SCRAM 해시로 변환, 평문이 서버·로그에 남지 않음)를 쓰되, 프롬프트가 입력을 표시하지 않아 붙여넣기 실패를 알아챌 수 없으므로 교체 직후 반드시 새 값으로 접속을 확인한다.
+- prod/dev 모두 서비스 계정이 `admin` 하나로 공유된다 — 데이터베이스 분리로 cross-database JOIN은 막혔지만, 같은 자격증명으로 다른 서비스의 DB에 접속할 수는 있다. 서비스별 역할(`book_app`/`auth_app`/`record_app`)로 나누고 `REVOKE CONNECT ... FROM PUBLIC` + 역할별 `GRANT CONNECT`까지 걸면 접근 자체가 차단된다 — 팀 간 자격증명 배포 조율이 필요해 이연했다.
+- prod EKS 클러스터 엔드포인트가 `publicAccessCidrs: 0.0.0.0/0`으로 인터넷 어디서나 접근 가능하다(IAM 인증은 걸려 있음) — 사무실/VPN IP로 좁히거나 private 전용 전환을 검토한다.

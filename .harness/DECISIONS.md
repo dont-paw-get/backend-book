@@ -1,5 +1,13 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-30: prod 인프라 결정 3건 — NAT Gateway 신설, Aurora Serverless v2 전환, DB 분리 방향 (CLIAR-112 후속)
+
+- **NAT Gateway를 둔다(단일 AZ, `public2-ap-northeast-2b`).** prod private 서브넷에 인터넷 아웃바운드가 아예 없어 외부 API(알라딘) 호출이 구조적으로 불가능했다. "백엔드는 private 서브넷에 둔다"는 원칙과 NAT는 충돌하지 않는다 — NAT는 아웃바운드 전용이라 인바운드 연결을 허용하지 않는다. 나가지도 못하게 막힌 상태는 보안이 아니라 기능 결손이었다. AZ는 현재 book 노드가 있는 2b를 골라 AZ 간 데이터 전송을 피했다. **AZ 장애 시 전체 아웃바운드가 끊기는 것은 알면서 감수**한 것이며, 런칭 시점에 AZ별 NAT 2개로 늘리고 각 private 라우팅 테이블이 같은 AZ의 NAT를 가리키게 한다(`BACKLOG.md`).
+- **`logs`/`sts`/`secretsmanager` 인터페이스 엔드포인트는 추가하지 않는다.** 처음에는 NAT 데이터 처리료 절감을 위해 권장했으나 계산해 보니 역전이었다 — 인터페이스 엔드포인트는 AZ마다 ENI가 상시 과금되는데(3종 × 2AZ = 6 ENI), 절감 대상인 로그·시크릿 트래픽은 작은 JSON 수준이라 고정비가 절감액을 크게 웃돈다. 기존 S3·ecr.api·ecr.dkr 엔드포인트는 이미지가 165MB로 커서 정당하므로 유지한다. 트래픽이 실제로 커지면 재검토한다.
+- **Aurora를 Serverless v2로 전환한다(0.5~8 ACU), reader 삭제, 스토리지 Standard.** 7일 실측이 커넥션 0, CPU 6~7%, 데이터 52MB, I/O 월 약 520만 건이었는데 `db.r7g.large` 2대 + I/O-Optimized로 운영되고 있었다. Serverless v2는 ACU 단가가 provisioned 동급보다 비싸 **평균 사용률이 동급 클래스의 50~60%를 넘으면 오히려 손해**지만, 현 사용률은 그 구간에서 한참 아래다. I/O-Optimized는 I/O 요금이 전체의 25%를 넘을 때 유리한 옵션인데 실제 I/O 비용은 월 $1~2 수준이라 명백한 손해였다. reader는 커넥션 0·읽기 IOPS 하루 2.4로 읽기 분산 수요가 없어 삭제했고, **writer 장애 시 페일오버가 수십 초에서 수 분으로 느려지는 것을 감수**한 것이다 — 런칭 전 다시 붙인다(`BACKLOG.md`). 최소 용량을 0이 아니라 0.5 ACU로 둔 것은, 자동 일시정지의 콜드 스타트(십수 초)가 배포 검증 중 원인 규명을 헷갈리게 만들 수 있어서다.
+- **DB 분리는 "같은 클러스터 안에서 데이터베이스 분리"로 간다(클러스터 분리 아님).** PostgreSQL은 데이터베이스 간 JOIN이 `dblink`/`postgres_fdw` 없이 불가능하므로, `CLAUDE.md`가 요구하는 "다른 서비스의 schema를 직접 JOIN해서 조회할 수 없다"를 엔진이 강제해 준다. 클러스터·인스턴스를 늘리지 않으니 추가 비용이 0이다. Aurora에서 인스턴스는 스토리지를 공유하므로 **인스턴스를 늘려도 DB가 나뉘지 않는다** — 격리 수단이 아니라 HA/읽기 확장 수단이다. 클러스터 분리(완전 격리)는 필요해지면 그때 Serverless v2로 가고, 그때도 인스턴스 고정비가 배수로 늘지 않는다. 다만 `CLAUDE.md`는 "자신만의 PostgreSQL 인스턴스·데이터베이스를 소유"라고 인스턴스까지 명시하고 있어, 이 결정은 문서를 엄격히 읽으면 부분 충족이다 — 문서 문구 조정 여부는 미결(`BACKLOG.md`).
+- **실행 시점은 prod 배포 마무리 이후로 미룬다.** auth·record 테이블을 옮기면 다른 팀 서비스가 dev에서 즉시 중단되고 각 저장소의 `DATABASE_URL`도 같은 시점에 바꿔야 해서, 진행 중인 장애 대응에 끼워 넣을 크기가 아니다. 계획만 `PLAN.md`에 확정해 두고 팀 확인을 기다린다.
+
 ## 2026-08-30: 컨테이너 이미지를 멀티아키(amd64+arm64)로 빌드 — prod arm64 노드 CrashLoopBackOff 해결 (CLIAR-112)
 
 - **배경:** `dpyb-prod`의 `backend-book` 파드가 이틀 넘게 CrashLoopBackOff(exit 255, 550회 재시작)였다. 컨테이너 로그는 `exec /opt/java/openjdk/bin/java: exec format error` 한 줄뿐 — JVM이 기동조차 못 했다는 뜻이라 애플리케이션/설정 문제가 아니었다. CI가 `ubuntu-latest`(amd64)에서 `docker build`를 돌려 **단일 아키텍처 amd64** 이미지만 만들고 있었고(ECR 매니페스트가 manifest list가 아닌 `manifest.v2`로 확인), `dpyb-prod` 노드는 전부 arm64(Graviton)다.
