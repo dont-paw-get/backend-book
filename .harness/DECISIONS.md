@@ -1,5 +1,10 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-30 (계속): prod EKS 엔드포인트 공개 접근 유지, prod DB 비밀번호 교체
+
+- **prod EKS 클러스터 엔드포인트를 `publicAccessCidrs: 0.0.0.0/0`으로 유지한다.** 열려 있는 것은 Kubernetes API 서버(컨트롤 플레인)이고 서비스 트래픽 경로(ALB → 파드)와는 무관하다. 모든 요청은 AWS IAM 인증과 Kubernetes RBAC 두 관문을 통과해야 하므로 "누구나 조작 가능"한 상태는 아니다 — 자물쇠는 잠겨 있고 문 앞까지 올 수 있는 상태다. **감수하는 위험은 명확하다**: 공격 표면이 인터넷에 노출되고, IAM 자격증명이 유출되면 위치 제한 없이 즉시 악용된다. CIDR 제한이 대안이지만 팀이 고정 IP를 쓰지 않으면 재택·이동 때마다 목록을 고쳐야 해 실효가 없고, 잘못 적용하면 전원이 클러스터에서 잠긴다. private 전용 전환은 VPN·Bastion 등 접근 수단을 새로 만들어야 해 현 규모에 과하다. 팀의 고정 IP 정책이 생기면 재검토한다.
+- **prod Aurora `admin` 비밀번호를 32자로 교체했다.** 최초 설정 과정에서 PowerShell 인용 문제로 실패한 `kubectl patch`의 에러 메시지에 평문이 출력돼 노출된 것이 이유다. 교체는 마스터 유저 없이 했다 — PostgreSQL에서 역할은 자기 비밀번호를 스스로 바꿀 수 있으므로 `admin`으로 접속해 `ALTER ROLE admin PASSWORD`를 실행했다. 값이 출력·argv·셸 히스토리 어디에도 남지 않도록 stdin 전달과 `kubectl patch --patch-file`을 썼다. **Windows에서 `kubectl patch -p`에 JSON을 넘기는 방식은 앞으로 쓰지 않는다** — PowerShell 5.1이 네이티브 실행 파일에 인자를 넘길 때 큰따옴표를 벗겨내 `ConvertTo-Json` 결과도 `\"` 이스케이프도 상황에 따라 깨진다. `--patch-file` 또는 bash 경유가 확실하다.
+
 ## 2026-08-30: prod 인프라 결정 3건 — NAT Gateway 신설, Aurora Serverless v2 전환, DB 분리 방향 (CLIAR-112 후속)
 
 - **NAT Gateway를 둔다(단일 AZ, `public2-ap-northeast-2b`).** prod private 서브넷에 인터넷 아웃바운드가 아예 없어 외부 API(알라딘) 호출이 구조적으로 불가능했다. "백엔드는 private 서브넷에 둔다"는 원칙과 NAT는 충돌하지 않는다 — NAT는 아웃바운드 전용이라 인바운드 연결을 허용하지 않는다. 나가지도 못하게 막힌 상태는 보안이 아니라 기능 결손이었다. AZ는 현재 book 노드가 있는 2b를 골라 AZ 간 데이터 전송을 피했다. **AZ 장애 시 전체 아웃바운드가 끊기는 것은 알면서 감수**한 것이며, 런칭 시점에 AZ별 NAT 2개로 늘리고 각 private 라우팅 테이블이 같은 AZ의 NAT를 가리키게 한다(`BACKLOG.md`).

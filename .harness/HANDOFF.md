@@ -324,3 +324,27 @@ PostgreSQL 16+ 함정 둘도 겪었다: `CREATE DATABASE ... OWNER admin`이 `mu
 **최종 검증**: Flyway가 빈 DB에서 `V1`~`V9`를 처음부터 적용해 `now at version v9`, `Started DpgbApplication`, Deployment `2/2`, 옛 ReplicaSet 2개 0으로 축소, `/health` `{"status":"UP"}` 200, ArgoCD `backend-book-prod` **Synced/Healthy**. 임시 psql 파드는 prod·dev 모두 정리했다.
 
 **다음 세션 시작 시**: prod는 정상 동작 중이다. 남은 것은 `.harness/PLAN.md`의 dev DB 분리 후속(auth·record 팀 전환 대기, 전원 전환 후 기존 `dpyb` 정리)과 `BACKLOG.md`의 항목들이다. 특히 **prod `admin` 비밀번호 교체**(노출됨)와 **서비스별 역할 분리**가 보안상 우선순위가 높다. 코드(`src/`)는 이번 세션에서 전혀 변경하지 않았다.
+
+## 2026-08-30: dev Aurora 잔재 정리 — `postgres`의 `alembic_version_auth` 드롭
+
+사용자가 "RDS에서 `test`와 `postgres` DB에 `public.alembic_version_auth` 삭제해줘"라고 요청했다. `BACKLOG.md`에 이미 올라와 있던 정리 항목이라 새 계획 절차 없이 바로 수행했다.
+
+dev Aurora는 private 서브넷에 있어 로컬에서 직접 붙을 수 없고, 이전 세션의 `psql-dev` 파드는 `Completed` 상태였다. 그래서 `dpyb-book-dev` 네임스페이스에 `backend-book-secret`의 `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`를 env로 받는 임시 파드(`psql-dev2`, `postgres:17-alpine`)를 띄워 작업하고 끝나고 삭제했다. (Git Bash에서 `kubectl exec ... -- sh /tmp/x.sh`는 경로가 Windows 경로로 변환되므로 `MSYS_NO_PATHCONV=1`이 필요했다.)
+
+드롭 전에 대상을 먼저 확인했다. **`test` 데이터베이스에는 `alembic_version_auth`가 아예 없었다** — `flyway_schema_history`/`librarian`/`library_book`/`scrap`/`shelf` 5개뿐으로, 조사 기록(book V6 시점 스키마)과 일치한다. `postgres` 데이터베이스에만 존재했고 소유자 `admin`, 컬럼 1개(`version_num`), **0행**, 의존 객체 0이었다. 트랜잭션 안에서 행 수를 다시 확인하고 `DROP TABLE public.alembic_version_auth`를 실행한 뒤 `to_regclass`가 NULL임을 확인했다. 데이터 손실은 없다.
+
+`BACKLOG.md`는 원래 이 건을 "auth 담당자 확인 후 드롭"으로 적어두고 있었다 — 사용자의 직접 지시로 진행했다. 빈 테이블이라 auth 쪽 실제 마이그레이션 이력(`dpyb`의 `205eb1a0a7eb`)에는 영향이 없다.
+
+**다음 세션 시작 시**: 같은 정리 항목 중 **`test` 데이터베이스 삭제(`DROP DATABASE test;`)는 아직 남아 있다**(`PLAN.md` B절, `BACKLOG.md`). 문서만 갱신했고 커밋은 하지 않았다.
+
+## 2026-08-30 (이어서): `test` 데이터베이스 삭제
+
+같은 세션에서 사용자가 `test` 데이터베이스도 삭제하라고 지시했다. 중간에 `mfa` 프로필의 STS 세션 토큰이 만료돼 `kubectl`이 전부 막혔다(kubeconfig의 dev 컨텍스트가 `AWS_PROFILE=mfa`로 `aws eks get-token`을 호출하는 구조). 사용자가 재발급하려다 실패했는데, 원인은 `get-session-token` 호출 자체가 만료된 `mfa` 프로필로 나간 것이었다 — **이 호출만큼은 장기 IAM 키인 `default` 프로필로 해야 한다**(`--profile default`). 이후 정상 발급됐다.
+
+드롭 전 상태 확인: owner `admin`, 8MB, 활성 커넥션 0, Flyway 버전 6. 행 수는 `flyway_schema_history` 6, `librarian` 2, `library_book`/`scrap`/`shelf` 0으로 조사 기록과 정확히 일치했다. `pg_dump -F c`로 백업(11KB)한 뒤 파드에서 스트리밍해 로컬로 꺼내고 md5로 대조했다 — `kubectl cp`는 Windows 드라이브 문자(`C:`)를 경로 구분자로 오인해 실패하므로 `kubectl exec -- cat > 파일`로 받았다. 그 다음 `postgres` 데이터베이스에 접속해 `DROP DATABASE test`를 실행하고 `pg_database`에서 사라진 것을 확인했다.
+
+**백업 파일은 세션 스크래치패드에만 있다**(`dpyb-dev-test-20260830.dump`). 보존이 필요하면 사용자가 옮겨야 한다 — 다만 시드 2행 외에 실데이터가 없어 실질 가치는 낮다.
+
+작업용 임시 파드 `psql-dev2`는 삭제했다. 참고로 `pg_database_size`를 전체 DB에 돌리면 `rdsadmin`에서 권한 거부가 나므로 목록 조회 시 제외해야 한다.
+
+**다음 세션 시작 시**: dev Aurora 잔재 정리는 이것으로 끝났다(`BACKLOG.md`에서 항목 제거). 남은 DB 관련 미결은 **구 통합 `dpyb` 데이터베이스 정리**인데, 이건 auth·record 팀이 각자 Secret의 `DATABASE_URL`을 `dpyb_auth`/`dpyb_record`로 바꿔 전환을 마친 뒤에만 진행한다(`PLAN.md` B절). `.harness` 문서 갱신은 커밋하지 않았다.
