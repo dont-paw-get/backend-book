@@ -2,49 +2,42 @@
 
 완료된 항목은 여기 체크만 남기지 않고 `STATE.md`로 옮긴 뒤 이 문서에서 제거한다.
 
-## prod 배포 CrashLoopBackOff 해결 — 배포·검증 잔여 단계 (CLIAR-112)
+## B. dev DB 분리 — book 완료, auth·record 전환 대기
 
-코드 변경(Dockerfile 멀티아키 + CI buildx 전환)과 문서 동기화는 완료해 커밋했다 — `STATE.md` 참조.
-사용자가 "커밋까지"로 범위를 정했으므로 아래는 **사용자가 직접 수행하거나 별도로 요청할 때** 진행한다.
+dev Aurora에 서비스별 데이터베이스를 만들고 **데이터를 복사**했다(옮긴 것이 아니라 복사 —
+각 팀이 준비되면 전환하면 되고 그 전까지 아무도 깨지지 않는다). book은 전환·검증까지 끝났다.
 
-### 배포
+| DB | 상태 |
+| --- | --- |
+| `dpyb_book` | ✅ 복사 완료, book 서비스 전환·기동 검증 완료 |
+| `dpyb_auth` | 복사 완료 — **auth 팀이 전환하면 됨** |
+| `dpyb_record` | 복사 완료(테이블은 `alembic_version_record` 하나, 0행) — **record 팀이 전환하면 됨** |
 
-- [ ] `CLIAR-112-Book-Server-EKS-prod-배포` 브랜치 push
-- [ ] `develop`으로 PR 생성·병합 → dev CI가 멀티아키 이미지를 빌드하는지 확인
-- [ ] `develop` → `main` 병합 → prod CI 실행
-  - prod ECR은 IMMUTABLE이라 기존 SHA 재push는 실패한다. 병합 커밋의 **새 SHA**로 push되어야 한다.
-  - `Dockerfile`/워크플로우 변경은 `paths-ignore`(k8s/argocd/docs/*.md)에 걸리지 않으므로 정상 트리거된다.
-- [ ] CI가 `k8s/overlays/prod/kustomization.yaml`의 `newTag`를 새 SHA로 갱신 커밋하는지 확인
-- [ ] ArgoCD가 prod Application을 동기화하는지 확인
+### auth·record 팀이 할 일
 
-### 검증
+각 저장소가 아니라 **dev 클러스터의 Secret만** 바꾸면 된다(Secret은 Git에 없어 ArgoCD가 되돌리지 않는다).
+`DATABASE_URL`의 데이터베이스 이름만 `dpyb` → `dpyb_auth` / `dpyb_record` 로 바꾸고 파드를 재생성한다.
 
-- [ ] ECR 이미지가 실제로 멀티아키인지 확인 (아키텍처 2개 + attestation 없음)
-      `aws ecr batch-get-image --repository-name dpyb-prod/dpyb-book --image-ids imageTag=<새SHA> --query 'images[0].imageManifest'`
-      → `manifest.list.v2`(또는 OCI `index`)에 `amd64`/`arm64` 두 항목이 보여야 한다.
-- [ ] `kubectl --context dpyb-prod -n dpyb-book get pods` 가 `2/2 Running`
-- [ ] 잔여 ReplicaSet(`backend-book-76c75b8c48`, `backend-book-d5798fd87`) 정리 확인
-- [ ] ArgoCD에서 Deployment health가 Degraded → Healthy 전환
-- [ ] `/health` 200 응답 확인
+- [ ] auth: `dpyb-auth-dev/backend-auth-secret` 의 `DATABASE_URL` 변경 후 파드 재생성·검증
+- [ ] record: `dpyb-record-dev/backend-record-secret` 의 `DATABASE_URL` 변경 후 파드 재생성·검증
 
-### 주의: 다음 단계 장애가 처음 드러날 수 있음
+### 전원 전환 후
 
-prod에서 JVM이 **한 번도 기동한 적이 없다**. 아키텍처를 고치면 그 뒤 단계의 문제가 처음 보일 수 있다.
-prod Secret(`backend-book-secret`)에 `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`/`ALADIN_API_TTB_KEY` 4개 키가
-모두 존재하는 것은 확인했으나, **RDS 실제 접속·Flyway 마이그레이션·Cognito 검증은 미확인**이다.
+- [ ] 일정 기간(롤백 대비) 유지한 뒤 기존 `dpyb` 데이터베이스 정리
+      — 세 서비스가 모두 새 DB에서 정상 동작하는 것을 확인한 다음에만 진행
+- [ ] auth·record 팀 안내용 런북(전환 절차·검증·롤백)은 Artifact로 작성해 공유했다
 
-- [ ] 파드가 뜬 직후 `kubectl --context dpyb-prod -n dpyb-book logs deploy/backend-book` 로
-      Flyway 마이그레이션과 Spring 기동 로그를 확인한다
-- [ ] 여전히 죽으면 이번엔 스택트레이스가 남으므로 그것을 근거로 다음 원인을 판단한다
+### 참고: 분리가 깨끗했던 이유
 
-### 긴급 롤백 레버
+서비스 경계를 넘는 외래키가 **하나도 없었다**.
 
-멀티아키 CI가 어떤 이유로든 막히고 prod를 즉시 살려야 하면, `k8s/cluster/nodepool-book.yaml`의
-`requirements`에 아래를 추가하고 `dpyb-prod` 컨텍스트에 `kubectl apply` 한다(임시 조치 — Graviton
-비용 이점을 포기하고 dev의 잠재 결함도 그대로 남으므로, 멀티아키 전환 후 반드시 되돌린다).
-
-```yaml
-        - key: kubernetes.io/arch
-          operator: In
-          values: ["amd64"]
 ```
+book : librarian→librarian_level, librarian→librarian_type_info,
+       library_book→shelf, scrap→library_book
+auth : member_agreement→member, member_agreement→terms, member_librarian→member
+```
+
+커스텀 enum 타입은 `-t` 덤프에 포함되지 않아 대상 DB에 먼저 만들어야 했다
+(book: `book_reading_status`/`genre_type`/`librarian_type`,
+auth: `member_agreement_action`/`member_gender`/`member_status`).
+`pg_dump`는 서버(17.7)와 같은 메이저 버전이어야 해서 `postgres:17-alpine` 클라이언트를 썼다.
