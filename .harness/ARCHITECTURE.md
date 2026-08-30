@@ -167,7 +167,9 @@ docker-compose.yml  # 로컬 개발용 PostgreSQL (POSTGRES_DB/USER/PASSWORD=dpg
 
 이 저장소는 Book Service(Java, 이 프로젝트)이며, 독립된 Python RAG Service와 별도로 개발된다.
 
-Book Service는 database-per-service 원칙에 따라 자신만의 PostgreSQL 인스턴스·데이터베이스를 소유한다(`.harness/DECISIONS.md` 참조 — 2026-08-20에 한 차례 "Java 서비스 전체가 하나의 DB를 공유"로 바뀌었다가, MSA 원칙에 맞게 다시 서비스별 분리로 되돌렸다). 다른 Java MSA 서비스는 물론 Python RAG Service의 schema도 직접 JOIN할 수 없고, 모든 서비스 간 데이터 공유는 API 또는 event로만 한다. Python RAG Service는 지금처럼 자체 PostgreSQL + pgvector를 별도로 소유한다.
+Book Service는 database-per-service 원칙에 따라 자신만의 데이터베이스를 소유한다(`.harness/DECISIONS.md` 참조 — 2026-08-20에 한 차례 "Java 서비스 전체가 하나의 DB를 공유"로 바뀌었다가, MSA 원칙에 맞게 다시 서비스별 분리로 되돌렸다). 다른 Java MSA 서비스는 물론 Python RAG Service의 schema도 직접 JOIN할 수 없고, 모든 서비스 간 데이터 공유는 API 또는 event로만 한다. Python RAG Service는 지금처럼 자체 PostgreSQL + pgvector를 별도로 소유한다.
+
+**실제 구현 형태(2026-08-30~)**: 서비스별 **데이터베이스** 분리이고 클러스터·인스턴스 분리는 아니다. 여러 서비스가 같은 Aurora PostgreSQL 클러스터를 공유하되 각자 자기 데이터베이스만 사용한다 — dev는 `dpyb-dev` 클러스터의 `dpyb_book`, prod는 `dpyb-prod` 클러스터의 `dpyb_book`이다(둘 다 role `admin` 소유). PostgreSQL은 데이터베이스 간 JOIN이 `dblink`/`postgres_fdw` 없이 불가능하므로 위 "직접 JOIN할 수 없다" 제약이 엔진 차원에서 강제되고, 클러스터를 늘리지 않아 인스턴스 고정비가 배수로 늘지 않는다. 2026-08-30 이전에는 세 서비스(auth·record·book) 테이블이 단일 `dpyb` 데이터베이스의 `public` 스키마 하나에 섞여 있었다. `CLAUDE.md`의 DB 정책 문구는 "인스턴스·데이터베이스"를 함께 명시하고 있어 이 형태와 엄밀히는 어긋난다 — 문구 조정 여부는 `.harness/BACKLOG.md` 참조.
 
 ## 테스트 구조
 
@@ -198,6 +200,8 @@ Book Service는 database-per-service 원칙에 따라 자신만의 PostgreSQL �
 - Flyway 마이그레이션은 `spring.flyway.enabled: true`로 앱 기동 시 자동 실행되므로, `backend-record`(Python/Alembic)처럼 별도 `initContainer`로 마이그레이션을 분리하지 않는다.
 - readiness/liveness probe는 `GET /health`(`com.chc.dpgb.health.HealthController`, 인증 불필요)를 대상으로 한다. ALB Ingress의 `alb.ingress.kubernetes.io/healthcheck-path`도 동일 경로를 쓴다.
 - `argocd/application-dev.yaml`: `targetRevision: develop`, `path: k8s/overlays/dev`, `automated.prune+selfHeal` — dev는 완전 자동 배포(같은 클러스터 `kubernetes.default.svc`). `argocd/application-prod.yaml`은 `targetRevision: main`, `path: k8s/overlays/prod`로 활성화되어 있으며, dev와 달리 원격 `dpyb-prod` 클러스터(`destination.name: dpyb-prod`, 사전에 `argocd cluster add --name dpyb-prod` 등록 필요)로 배포한다.
+- prod 네트워크: `dpyb-prod` VPC(`vpc-0e6d4633d86f40838`)의 private 서브넷 4개는 아웃바운드를 NAT Gateway(`nat-0c14a04ce3a253648`, `public2-ap-northeast-2b`)로 나간다 — 2026-08-30 이전에는 NAT가 없어 외부 API(알라딘) 호출과 Docker Hub pull이 모두 불가능했다. NAT는 단일 AZ이고 4개 라우팅 테이블 모두 이 하나를 가리킨다(`.harness/BACKLOG.md`에 AZ별 이중화 항목). VPC 엔드포인트는 S3(Gateway)·ecr.api·ecr.dkr 3종이며, ECR 이미지 pull은 NAT가 아니라 이 엔드포인트를 탄다. `dpyb-dev` VPC(`vpc-0093ef1d89d6bfd57`)는 별도 VPC이고 자체 NAT를 갖는다 — 두 VPC 모두 CIDR이 `10.0.0.0/16`이라 피어링은 불가능하다.
+- DB 런타임: dev·prod 모두 Aurora PostgreSQL 17.7. prod 클러스터(`dpyb-prod`)는 2026-08-30에 provisioned `db.r7g.large` 2대(writer+reader) + I/O-Optimized에서 **Serverless v2 writer 1대(0.5~8 ACU) + Standard 스토리지**로 전환했다(dev는 이전부터 `db.serverless`). reader가 없어 페일오버가 느려지는 것은 런칭 전까지 감수하는 상태다(`.harness/BACKLOG.md`).
 - ALB IngressClass(`alb`)는 `backend-auth` 레포에서 클러스터 전역으로 이미 구성되어 있고 여러 서비스가 공유한다 — 이 저장소에서 별도로 만들지 않는다.
 - 배포용 `Dockerfile`은 2-스테이지다. 빌드 스테이지는 `FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk`로 러너 네이티브 아키텍처에 고정해 Gradle을 한 번만 실행하고(산출물 jar이 아키텍처 중립이므로 가능), 런타임 스테이지(`eclipse-temurin:21-jre`)만 타깃 아키텍처를 따라간다 — 멀티아키 빌드에 QEMU 에뮬레이션 비용이 들지 않는 이유다.
 - 배포용 `Dockerfile`은 root로 실행되고(별도 `USER` 없음) non-root 사용자를 두지 않는다 — `k8s/base/deployment.yaml`의 `securityContext`도 이에 맞춰 `runAsNonRoot`/`readOnlyRootFilesystem`을 강제하지 않는다(CI/CD 구축 시점에 사용자가 확인, Dockerfile 자체는 변경하지 않기로 결정).

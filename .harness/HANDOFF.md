@@ -302,3 +302,49 @@ CLIAR-35 커밋(`74bb92a`) 이후 같은 세션에서 "swagger API 작성해" �
 **다음 세션 시작 시**: 이 작업은 `CLIAR-112-Book-Server-EKS-prod-배포` 브랜치에 커밋만 되어 있고 **push되지 않았다**. `.harness/PLAN.md`의 잔여 체크리스트(push → develop PR → main 병합 → ECR 매니페스트가 아키텍처 2개인지 확인 → prod 파드 `2/2 Running` → 잔여 ReplicaSet 정리 → ArgoCD Healthy → `/health` 200)를 이어서 진행한다. prod ECR은 IMMUTABLE이라 기존 SHA 재push가 아닌 **새 병합 커밋 SHA**로 나가야 한다.
 
 **중요한 미확인 사항**: prod에서 JVM이 지금까지 한 번도 기동한 적이 없으므로, 아키텍처를 고치면 그 다음 단계 문제가 처음 드러날 수 있다. prod Secret에 `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`/`ALADIN_API_TTB_KEY` 4개 키가 존재하는 것까지만 확인했고 **RDS 실제 접속·Flyway 마이그레이션·Cognito 검증은 전부 미확인**이다. 파드가 뜬 직후 로그를 반드시 확인할 것 — 이번엔 죽더라도 스택트레이스가 남는다.
+
+## 2026-08-30: prod EKS 배포 완료 — 세 겹의 원인을 순차 해소, dev DB 서비스별 분리 (CLIAR-112)
+
+사용자가 "prod 환경 배포를 마무리하려는데 ArgoCD에서 Degraded가 떠 있다"며 시작한 세션이, 원인을 하나씩 벗겨내며 인프라 작업 여러 건으로 이어졌다. `backend-book` prod 파드는 이틀 넘게 CrashLoopBackOff였고 **원인이 세 겹으로 쌓여 있었다** — 하나를 고칠 때마다 다음 것이 드러났다.
+
+**1겹: 아키텍처 불일치.** `kubectl logs --previous`가 `exec /opt/java/openjdk/bin/java: exec format error` 한 줄만 남긴 것이 단서였다(Spring 배너도 스택트레이스도 없음 = JVM이 exec 시점에 실패). CI가 `ubuntu-latest`에서 amd64 단일 아키텍처 이미지를 만드는데 `dpyb-prod` 노드는 전부 arm64(Graviton)였다. dev가 멀쩡했던 건 amd64/arm64 혼합 클러스터에서 파드가 우연히 amd64 노드에 착지했기 때문 — 실력이 아니라 운이었고, 재배치되면 dev도 같이 죽을 잠재 결함이었다. `Dockerfile` 빌드 스테이지를 `--platform=$BUILDPLATFORM`으로 고정하고(jar이 아키텍처 중립이라 Gradle은 1회만 돌고 QEMU 에뮬레이션 비용이 없다) CI를 `docker/build-push-action`(`platforms: linux/amd64,linux/arm64`, `provenance: false`)으로 교체했다. buildx 멀티플랫폼은 로컬 이미지가 남지 않아 `docker tag`를 못 쓰므로 push 태그 목록을 "Resolve target by branch" 스텝의 `tags` 출력으로 계산하게 함께 바꿨다. PR #19가 develop·main에 병합되어 CI 성공, ECR 이미지가 OCI index에 `linux/amd64`+`linux/arm64` 두 항목만 갖는 것을 확인했다(커밋 `598fc06`).
+
+**2겹: 아웃바운드 부재.** 아키텍처를 고치니 JVM이 뜨면서 `FlywaySqlUnableToConnectToDbException` → `28P01`이 나왔다. 조사 중 별개 문제를 발견 — prod VPC의 private 서브넷 4개에 `0.0.0.0/0` 경로가 아예 없었다(S3 게이트웨이 + ECR 인터페이스 엔드포인트만). 외부 API를 쓰는 서비스인데 알라딘 호출이 구조적으로 불가능한 상태였고, 디버깅용 psql 이미지도 Docker Hub에서 받을 수 없었다. `public2-ap-northeast-2b`에 NAT Gateway(`nat-0c14a04ce3a253648`, EIP `52.78.78.173`)를 만들고 private 라우팅 테이블 4개 전부에 경로를 추가했다. book 노드가 2b에 있어 AZ 간 전송이 없는 배치다. 검증은 파드에서 `curl checkip.amazonaws.com`이 NAT EIP를 그대로 반환하는 것으로 했다(제 PC에서 대신 호출한 게 아님을 증명하는 유일한 방법이었고, 사용자가 이 점을 정확히 물었다). 알라딘 HTTP 200, Docker Hub pull 성공. **처음에 `logs`/`sts`/`secretsmanager` 인터페이스 엔드포인트 추가도 권했다가 철회했다** — AZ마다 ENI가 상시 과금되는데 절감 대상 트래픽이 작은 JSON 수준이라 고정비가 절감액을 웃돈다.
+
+**3겹: DB 자체가 없음.** `admin`이 `dpyb`뿐 아니라 반드시 존재하는 `postgres` 데이터베이스로도 `28P01`로 거부되는 것을 확인해 "비밀번호가 아니라 역할이 없다"를 확정했다(prod/dev의 `DB_PASSWORD`는 해시 비교로 동일함을 확인했으므로 비밀번호 문제일 수 없었다). 사용자가 "권한 문제 아니냐"고 물었을 때 `28P01`은 인증 단계 오류이고 권한 문제면 `42501`/`3D000`이 난다는 점으로 배제했다. dev의 `admin`을 조사하니 `LOGIN`+`CREATEDB`뿐이고 `rds_superuser` 멤버십 없이 DB 소유자라는 단순한 구성이었다(소유자면 `pg_database_owner`를 통해 `public` 스키마 권한이 자동으로 따라온다). 마스터로 `admin` 역할과 `dpyb_book`/`dpyb_auth`/`dpyb_record`를 생성했다.
+
+**중간에 Aurora 최적화도 했다.** 7일 실측이 커넥션 0, CPU 6~7%, 데이터 52MB인데 `db.r7g.large` 2대 + I/O-Optimized였다(dev는 `db.serverless`). reader 삭제, writer를 `db.serverless`(0.5~8 ACU)로 전환, 스토리지를 Standard로 바꿨다. 실측 I/O가 월 약 520만 건이라 I/O-Optimized 프리미엄이 명백한 손해였다.
+
+**dev DB 서비스별 분리도 같은 세션에서 실행했다(팀 승인 후).** 단일 `dpyb`의 `public` 스키마 하나에 세 서비스 테이블 13개가 섞여 있었다. 서비스 경계를 넘는 외래키가 하나도 없음을 먼저 확인하고, 같은 클러스터 안에서 `dpyb_book`/`dpyb_auth`/`dpyb_record`로 나눴다(클러스터·인스턴스를 늘리지 않아 추가 비용 0). **옮기지 않고 복사**해 각 팀이 준비되면 전환하도록 했다. 두 함정 — `pg_dump -t`는 커스텀 enum 타입을 포함하지 않아 대상 DB에 6종을 먼저 만들어야 했고, `pg_dump`는 서버와 메이저 버전이 같아야 해서 `postgres:16-alpine`이 17.7 서버를 거부했다(`postgres:17-alpine`으로 교체). book은 전환·검증까지 완료했고, auth·record 팀용 런북을 Artifact로 작성해 공유했다(https://claude.ai/code/artifact/ce6455b7-be45-40bf-96c8-7bf5b6da7e40). 이 분리 덕분에 **prod는 처음부터 `dpyb_book`으로 만들어 나중에 이전할 일이 없어졌다.**
+
+**PowerShell 인용 문제로 상당히 헤맸다는 점을 남겨둔다.** PowerShell 5.1은 네이티브 실행 파일에 인자를 넘길 때 큰따옴표를 벗겨내서, `ConvertTo-Json`으로 만든 patch가 `invalid character 's'`로 실패하고 `\"` 이스케이프도 상황에 따라 깨졌다. 그 과정에서 **에러 메시지에 새 비밀번호가 평문 출력**됐다(`BACKLOG.md`에 교체 항목 추가). 또 psql `\password`는 입력을 화면에 표시하지 않아 붙여넣기 실패를 알아챌 수 없었고, 결국 DB에 설정된 값과 Secret의 값이 어긋나 인증 실패가 한 번 더 났다 — 최종적으로 `ALTER ROLE admin PASSWORD '...'`로 DB를 Secret에 맞추는 방향으로 해결했다. **다음에 Windows에서 kubectl patch를 안내할 때는 처음부터 `--patch-file` 또는 bash 경유를 쓰는 게 낫다.**
+
+PostgreSQL 16+ 함정 둘도 겪었다: `CREATE DATABASE ... OWNER admin`이 `must be able to SET ROLE`로 실패해 `GRANT admin TO postgres`가 선행되어야 했고, psql `\c`는 실패해도 이전 연결이 유지되어 뒤따르는 `GRANT`가 엉뚱한 DB에 걸렸다(회수 필요).
+
+**최종 검증**: Flyway가 빈 DB에서 `V1`~`V9`를 처음부터 적용해 `now at version v9`, `Started DpgbApplication`, Deployment `2/2`, 옛 ReplicaSet 2개 0으로 축소, `/health` `{"status":"UP"}` 200, ArgoCD `backend-book-prod` **Synced/Healthy**. 임시 psql 파드는 prod·dev 모두 정리했다.
+
+**다음 세션 시작 시**: prod는 정상 동작 중이다. 남은 것은 `.harness/PLAN.md`의 dev DB 분리 후속(auth·record 팀 전환 대기, 전원 전환 후 기존 `dpyb` 정리)과 `BACKLOG.md`의 항목들이다. 특히 **prod `admin` 비밀번호 교체**(노출됨)와 **서비스별 역할 분리**가 보안상 우선순위가 높다. 코드(`src/`)는 이번 세션에서 전혀 변경하지 않았다.
+
+## 2026-08-30: dev Aurora 잔재 정리 — `postgres`의 `alembic_version_auth` 드롭
+
+사용자가 "RDS에서 `test`와 `postgres` DB에 `public.alembic_version_auth` 삭제해줘"라고 요청했다. `BACKLOG.md`에 이미 올라와 있던 정리 항목이라 새 계획 절차 없이 바로 수행했다.
+
+dev Aurora는 private 서브넷에 있어 로컬에서 직접 붙을 수 없고, 이전 세션의 `psql-dev` 파드는 `Completed` 상태였다. 그래서 `dpyb-book-dev` 네임스페이스에 `backend-book-secret`의 `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`를 env로 받는 임시 파드(`psql-dev2`, `postgres:17-alpine`)를 띄워 작업하고 끝나고 삭제했다. (Git Bash에서 `kubectl exec ... -- sh /tmp/x.sh`는 경로가 Windows 경로로 변환되므로 `MSYS_NO_PATHCONV=1`이 필요했다.)
+
+드롭 전에 대상을 먼저 확인했다. **`test` 데이터베이스에는 `alembic_version_auth`가 아예 없었다** — `flyway_schema_history`/`librarian`/`library_book`/`scrap`/`shelf` 5개뿐으로, 조사 기록(book V6 시점 스키마)과 일치한다. `postgres` 데이터베이스에만 존재했고 소유자 `admin`, 컬럼 1개(`version_num`), **0행**, 의존 객체 0이었다. 트랜잭션 안에서 행 수를 다시 확인하고 `DROP TABLE public.alembic_version_auth`를 실행한 뒤 `to_regclass`가 NULL임을 확인했다. 데이터 손실은 없다.
+
+`BACKLOG.md`는 원래 이 건을 "auth 담당자 확인 후 드롭"으로 적어두고 있었다 — 사용자의 직접 지시로 진행했다. 빈 테이블이라 auth 쪽 실제 마이그레이션 이력(`dpyb`의 `205eb1a0a7eb`)에는 영향이 없다.
+
+**다음 세션 시작 시**: 같은 정리 항목 중 **`test` 데이터베이스 삭제(`DROP DATABASE test;`)는 아직 남아 있다**(`PLAN.md` B절, `BACKLOG.md`). 문서만 갱신했고 커밋은 하지 않았다.
+
+## 2026-08-30 (이어서): `test` 데이터베이스 삭제
+
+같은 세션에서 사용자가 `test` 데이터베이스도 삭제하라고 지시했다. 중간에 `mfa` 프로필의 STS 세션 토큰이 만료돼 `kubectl`이 전부 막혔다(kubeconfig의 dev 컨텍스트가 `AWS_PROFILE=mfa`로 `aws eks get-token`을 호출하는 구조). 사용자가 재발급하려다 실패했는데, 원인은 `get-session-token` 호출 자체가 만료된 `mfa` 프로필로 나간 것이었다 — **이 호출만큼은 장기 IAM 키인 `default` 프로필로 해야 한다**(`--profile default`). 이후 정상 발급됐다.
+
+드롭 전 상태 확인: owner `admin`, 8MB, 활성 커넥션 0, Flyway 버전 6. 행 수는 `flyway_schema_history` 6, `librarian` 2, `library_book`/`scrap`/`shelf` 0으로 조사 기록과 정확히 일치했다. `pg_dump -F c`로 백업(11KB)한 뒤 파드에서 스트리밍해 로컬로 꺼내고 md5로 대조했다 — `kubectl cp`는 Windows 드라이브 문자(`C:`)를 경로 구분자로 오인해 실패하므로 `kubectl exec -- cat > 파일`로 받았다. 그 다음 `postgres` 데이터베이스에 접속해 `DROP DATABASE test`를 실행하고 `pg_database`에서 사라진 것을 확인했다.
+
+**백업 파일은 세션 스크래치패드에만 있다**(`dpyb-dev-test-20260830.dump`). 보존이 필요하면 사용자가 옮겨야 한다 — 다만 시드 2행 외에 실데이터가 없어 실질 가치는 낮다.
+
+작업용 임시 파드 `psql-dev2`는 삭제했다. 참고로 `pg_database_size`를 전체 DB에 돌리면 `rdsadmin`에서 권한 거부가 나므로 목록 조회 시 제외해야 한다.
+
+**다음 세션 시작 시**: dev Aurora 잔재 정리는 이것으로 끝났다(`BACKLOG.md`에서 항목 제거). 남은 DB 관련 미결은 **구 통합 `dpyb` 데이터베이스 정리**인데, 이건 auth·record 팀이 각자 Secret의 `DATABASE_URL`을 `dpyb_auth`/`dpyb_record`로 바꿔 전환을 마친 뒤에만 진행한다(`PLAN.md` B절). `.harness` 문서 갱신은 커밋하지 않았다.
