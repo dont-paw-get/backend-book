@@ -276,4 +276,14 @@ class ScrapControllerTest {
         mockMvc.perform(get("/api/v1/library/scraps/456"))
                 .andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void 스크랩_생성_요청에_sentence가_없으면_400_INVALID_SCRAP_DATA() throws Exception {
+        mockMvc.perform(post("/api/v1/library/books/1/scraps")
+                        .with(member1Jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"scrapImageUrl\":\"https://img\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_SCRAP_DATA"));
+    }
 }

@@ -2,6 +2,7 @@ package com.chc.dpgb.library.web;
 
 import java.util.UUID;
 
+import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -37,7 +38,7 @@ public class ScrapController {
     @ResponseStatus(HttpStatus.CREATED)
     public ScrapDetailResponse createScrap(
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
-            @RequestBody CreateScrapRequest request
+            @Valid @RequestBody CreateScrapRequest request
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         Scrap scrap = scrapService.createScrap(memberId, bookId, request.sentence(), request.pageNumber(),
@@ -66,7 +67,7 @@ public class ScrapController {
     @PatchMapping("/api/v1/library/scraps/{scrapId}")
     public ScrapDetailResponse updateScrap(
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long scrapId,
-            @RequestBody UpdateScrapRequest request
+            @Valid @RequestBody UpdateScrapRequest request
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         Scrap scrap = scrapService.updateScrap(memberId, scrapId, request.sentence(), request.pageNumber(),

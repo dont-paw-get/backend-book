@@ -3,6 +3,7 @@ package com.chc.dpgb.library.web;
 import java.util.List;
 import java.util.UUID;
 
+import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -48,7 +49,7 @@ public class ShelfController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public CreateShelfResponse createShelf(
-            @AuthenticationPrincipal Jwt jwt, @RequestBody CreateShelfRequest request
+            @AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateShelfRequest request
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         Shelf shelf = shelfService.createShelf(memberId, request.name());
@@ -68,7 +69,7 @@ public class ShelfController {
     @PatchMapping("/{shelfId}")
     public UpdateShelfResponse updateShelf(
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long shelfId,
-            @RequestBody UpdateShelfRequest request
+            @Valid @RequestBody UpdateShelfRequest request
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         Shelf shelf = shelfService.updateShelf(memberId, shelfId, request.name());

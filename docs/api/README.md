@@ -25,3 +25,4 @@
 - [`0010-reintroduce-genre-and-reading-status.md`](./decisions/0010-reintroduce-genre-and-reading-status.md): `genre`(ADR-0003 부분 반전)·`readingStatus`(ADR-0005 전체 반전) 재도입, `totalPages` 선택 필드 전환 근거
 - [`0011-librarian-ownership-model.md`](./decisions/0011-librarian-ownership-model.md): 사서를 마스터 카탈로그에서 회원 소유 인스턴스(레벨/경험치/대표 여부)로 재정의, 대표 사서 선택을 Book Service로 재통합(ADR-0009 대체) 근거
 - [`0012-isbn-based-book-search.md`](./decisions/0012-isbn-based-book-search.md): 도서 검색을 title/author에서 isbn 기준으로 전환, 검색 시점에 서재 등록 여부를 확인해 등록된 도서면 저장된 데이터를 즉시 반환하는 근거
+- [`0013-null-serialization-and-request-validation.md`](./decisions/0013-null-serialization-and-request-validation.md): nullable 필드를 생략이 아닌 `null`로 전송한다는 규칙 명문화, 요청 검증을 Bean Validation으로 강제하고 검증 실패를 endpoint별 기존 에러 코드에 매핑한 근거

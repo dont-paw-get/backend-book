@@ -1,5 +1,6 @@
 package com.chc.dpgb.library.web;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -72,6 +73,13 @@ class LibraryBookControllerTest {
         return withBookId(LibraryBook.register(
                 MEMBER_1, shelfId, "m", "어린 왕자", "생텍쥐페리", "9788932917245", genre, "열린책들",
                 LocalDate.of(2015, 10, 20), "https://example.com/cover.jpg", readingStatus, 160
+        ));
+    }
+
+    /** isbn/publisher/publishedDate/coverUrl/totalPages 가 모두 비어 있는 책 — nullable 직렬화 확인용 */
+    private static LibraryBook bookWithoutOptionalFields() {
+        return withBookId(LibraryBook.register(
+                MEMBER_1, 1L, "m", "어린 왕자", "생텍쥐페리", null, null, null, null, null, null, null
         ));
     }
 
@@ -227,8 +235,9 @@ class LibraryBookControllerTest {
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"어린 왕자","author":"생텍쥐페리","isbn":null,"publisher":null,
-                                 "publishedDate":null,"coverUrl":null,"totalPages":158}
+                                {"title":"어린 왕자","author":"생텍쥐페리","isbn":null,"genre":"NONE",
+                                 "publisher":null,"publishedDate":null,"coverUrl":null,
+                                 "readingStatus":"PLANNED","totalPages":158}
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.bookId").isNumber());
@@ -244,8 +253,9 @@ class LibraryBookControllerTest {
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"","author":"생텍쥐페리","isbn":null,"publisher":null,
-                                 "publishedDate":null,"coverUrl":null,"totalPages":158}
+                                {"title":"","author":"생텍쥐페리","isbn":null,"genre":"NONE",
+                                 "publisher":null,"publishedDate":null,"coverUrl":null,
+                                 "readingStatus":"PLANNED","totalPages":158}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_BOOK_DATA"));
@@ -261,8 +271,9 @@ class LibraryBookControllerTest {
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"어린 왕자","author":"생텍쥐페리","isbn":null,"publisher":null,
-                                 "publishedDate":null,"coverUrl":null,"totalPages":158}
+                                {"title":"어린 왕자","author":"생텍쥐페리","isbn":null,"genre":"NONE",
+                                 "publisher":null,"publishedDate":null,"coverUrl":null,
+                                 "readingStatus":"PLANNED","totalPages":158}
                                 """))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("LIBRARY_BOOK_ACCESS_DENIED"));
@@ -278,8 +289,9 @@ class LibraryBookControllerTest {
                         .with(member1Jwt())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title":"어린 왕자","author":"생텍쥐페리","isbn":null,"publisher":null,
-                                 "publishedDate":null,"coverUrl":null,"totalPages":158}
+                                {"title":"어린 왕자","author":"생텍쥐페리","isbn":null,"genre":"NONE",
+                                 "publisher":null,"publishedDate":null,"coverUrl":null,
+                                 "readingStatus":"PLANNED","totalPages":158}
                                 """))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("LIBRARY_BOOK_NOT_FOUND"));
@@ -485,5 +497,81 @@ class LibraryBookControllerTest {
     void 인증되지_않으면_401을_반환한다() throws Exception {
         mockMvc.perform(get("/api/v1/library/books/123"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    // ---------- Bean Validation 실패가 계약이 정한 400 코드로 나가는지 (ADR-0013) ----------
+
+    @Test
+    void 등록_요청에_title이_없으면_400_INVALID_BOOK_DATA() throws Exception {
+        mockMvc.perform(post("/api/v1/library/books")
+                        .with(member1Jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"author\":\"생텍쥐페리\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_BOOK_DATA"));
+    }
+
+    @Test
+    void 등록_요청의_isbn_형식이_틀리면_400_INVALID_BOOK_DATA() throws Exception {
+        mockMvc.perform(post("/api/v1/library/books")
+                        .with(member1Jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"제목\",\"author\":\"저자\",\"isbn\":\"12345\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_BOOK_DATA"));
+    }
+
+    @Test
+    void 재정렬_요청에_before와_after를_둘_다_주면_400_INVALID_REORDER_TARGET() throws Exception {
+        mockMvc.perform(patch("/api/v1/library/books/123/order")
+                        .with(member1Jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"beforeBookId\":1,\"afterBookId\":2}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REORDER_TARGET"));
+    }
+
+    @Test
+    void 책장_이동_요청에_shelfId가_없으면_400_INVALID_SHELF_TARGET() throws Exception {
+        mockMvc.perform(patch("/api/v1/library/books/123/shelf")
+                        .with(member1Jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_SHELF_TARGET"));
+    }
+
+    @Test
+    void 진도_수정_요청에_currentPage가_없으면_400_INVALID_PAGE_VALUE() throws Exception {
+        mockMvc.perform(patch("/api/v1/library/books/123/progress")
+                        .with(member1Jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"totalPages\":100}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_PAGE_VALUE"));
+    }
+
+    /**
+     * openapi.yaml이 이 필드들을 {@code [X, "null"]} + {@code required}로 선언한 근거다 (ADR-0013) — 값이 없어도
+     * 키가 사라지지 않고 {@code null}로 실려 나간다. Jackson 설정을 {@code non_null}로 바꾸면 이 테스트가 깨지고,
+     * 그때는 명세도 함께 바꿔야 한다.
+     */
+    @Test
+    void 상세_응답은_값이_없는_필드도_키를_남기고_null로_보낸다() throws Exception {
+        when(libraryBookService.getLibraryBook(MEMBER_1, 123L)).thenReturn(bookWithoutOptionalFields());
+
+        String body = mockMvc.perform(get("/api/v1/library/books/123").with(member1Jwt()))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(body)
+                .contains("\"isbn\":null")
+                .contains("\"publisher\":null")
+                .contains("\"publishedDate\":null")
+                .contains("\"coverUrl\":null")
+                .contains("\"totalPages\":null")
+                .contains("\"progress\":null");
     }
 }

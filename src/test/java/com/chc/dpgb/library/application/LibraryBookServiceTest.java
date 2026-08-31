@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import com.chc.dpgb.common.exception.BookAlreadyRegisteredException;
@@ -163,17 +165,46 @@ class LibraryBookServiceTest {
     }
 
     @Test
-    void 동시_등록으로_유일성_제약을_위반하면_409로_변환한다() {
-        Shelf shelf = Shelf.create(MEMBER_1, "책장", false);
-        setShelfId(shelf, 1L);
-        when(shelfRepository.findById(1L)).thenReturn(Optional.of(shelf));
-        when(libraryBookRepository.findLastRanked(1L)).thenReturn(Optional.empty());
+    void 동시_등록으로_isbn_유일성_제약을_위반하면_409로_변환한다() {
+        givenShelfReadyForSave();
         when(libraryBookRepository.save(any(LibraryBook.class)))
-                .thenThrow(new DataIntegrityViolationException("duplicate"));
+                .thenThrow(isbnUniqueViolation());
 
         assertThatThrownBy(() -> libraryBookService.createLibraryBook(
                 MEMBER_1, 1L, "제목", "저자", null, null, null, null, null, null, 100
         )).isInstanceOf(BookAlreadyRegisteredException.class);
+    }
+
+    @Test
+    void isbn_유일성이_아닌_무결성_위반은_409로_바꾸지_않는다() {
+        givenShelfReadyForSave();
+        DataIntegrityViolationException notNullViolation = new DataIntegrityViolationException(
+                "not-null property references a null or transient value",
+                new ConstraintViolationException(
+                        "null value in column \"title\"", new SQLException("23502"), "library_book_title_not_null")
+        );
+        when(libraryBookRepository.save(any(LibraryBook.class))).thenThrow(notNullViolation);
+
+        assertThatThrownBy(() -> libraryBookService.createLibraryBook(
+                MEMBER_1, 1L, "제목", "저자", null, null, null, null, null, null, 100
+        )).isSameAs(notNullViolation);
+    }
+
+    private void givenShelfReadyForSave() {
+        Shelf shelf = Shelf.create(MEMBER_1, "책장", false);
+        setShelfId(shelf, 1L);
+        when(shelfRepository.findById(1L)).thenReturn(Optional.of(shelf));
+        when(libraryBookRepository.findLastRanked(1L)).thenReturn(Optional.empty());
+    }
+
+    private DataIntegrityViolationException isbnUniqueViolation() {
+        return new DataIntegrityViolationException(
+                "could not execute statement",
+                new ConstraintViolationException(
+                        "duplicate key value violates unique constraint",
+                        new SQLException("23505"),
+                        "uk_library_book_member_isbn")
+        );
     }
 
     @Test

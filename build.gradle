@@ -34,6 +34,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+	// 요청 DTO 제약(openapi.yaml의 required/minLength/maxLength/pattern/minimum)을 실제로 강제한다 (ADR-0013)
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	// Boot 4.1의 세분화된 autoconfigure 모듈 체계에서 spring-boot-flyway(FlywayAutoConfiguration)는
 	// spring-boot-starter-data-jpa에 딸려오지 않는다 — 이 starter로 명시적으로 가져와야
 	// 마이그레이션이 앱 기동 시 자동 실행된다.

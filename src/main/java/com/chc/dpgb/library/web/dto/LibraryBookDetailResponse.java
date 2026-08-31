@@ -1,5 +1,7 @@
 package com.chc.dpgb.library.web.dto;
 
+import java.time.LocalDate;
+
 import com.chc.dpgb.library.domain.Genre;
 import com.chc.dpgb.library.domain.LibraryBook;
 import com.chc.dpgb.library.domain.ReadingStatus;
@@ -13,6 +15,7 @@ public record LibraryBookDetailResponse(
         String isbn,
         Genre genre,
         String publisher,
+        LocalDate publishedDate,
         Integer totalPages,
         String coverUrl,
         ReadingStatus readingStatus,
@@ -23,8 +26,9 @@ public record LibraryBookDetailResponse(
     public static LibraryBookDetailResponse from(LibraryBook book) {
         return new LibraryBookDetailResponse(
                 book.getBookId(), book.getShelfId(), book.getShelfRank(), book.getTitle(), book.getAuthor(),
-                book.getIsbn(), book.getGenre(), book.getPublisher(), book.getTotalPages(), book.getCoverUrl(),
-                book.getReadingStatus(), book.getCurrentPage(), book.progress()
+                book.getIsbn(), book.getGenre(), book.getPublisher(), book.getPublishedDate(),
+                book.getTotalPages(), book.getCoverUrl(), book.getReadingStatus(), book.getCurrentPage(),
+                book.progress()
         );
     }
 }

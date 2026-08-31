@@ -239,4 +239,14 @@ class ShelfControllerTest {
         mockMvc.perform(get("/api/v1/library/shelves"))
                 .andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void 책장_생성_요청의_name이_비어_있으면_400_INVALID_SHELF_DATA() throws Exception {
+        mockMvc.perform(post("/api/v1/library/shelves")
+                        .with(member1Jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_SHELF_DATA"));
+    }
 }

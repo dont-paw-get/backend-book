@@ -2,6 +2,7 @@ package com.chc.dpgb.common.exception;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -33,6 +34,20 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BadGatewayException.class)
     public ResponseEntity<ErrorResponse> handleBadGateway(BadGatewayException ex) {
         return toResponse(HttpStatus.BAD_GATEWAY, ex);
+    }
+
+    /**
+     * 요청 DTO의 Bean Validation 실패를 endpoint별 계약 코드로 옮긴다 (ADR-0013). 매핑에 없는 요청 타입이면
+     * 계약에 없는 400을 지어내지 않고 기존 500 경로로 흘려보낸다 — 새 요청 DTO에 매핑을 빠뜨린 사실이 드러나야 한다.
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleRequestValidationFailure(MethodArgumentNotValidException ex) {
+        Class<?> requestType = ex.getParameter().getParameterType();
+        BadRequestException translated = RequestValidationFailureTranslator.translate(requestType);
+        if (translated == null) {
+            return handleUnexpected(ex);
+        }
+        return toResponse(HttpStatus.BAD_REQUEST, translated);
     }
 
     @ExceptionHandler(Exception.class)

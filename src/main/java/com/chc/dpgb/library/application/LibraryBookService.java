@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -29,6 +30,9 @@ import com.chc.dpgb.library.domain.ShelfRankExhaustedException;
 
 @Service
 public class LibraryBookService {
+
+    /** V7 마이그레이션의 partial unique index 이름 — DB 스키마와 이 상수는 함께 바뀌어야 한다. */
+    private static final String ISBN_UNIQUE_INDEX = "uk_library_book_member_isbn";
 
     private final LibraryBookRepository libraryBookRepository;
     private final ShelfRepository shelfRepository;
@@ -90,8 +94,27 @@ public class LibraryBookService {
         try {
             return libraryBookRepository.save(book);
         } catch (DataIntegrityViolationException e) {
-            throw new BookAlreadyRegisteredException();
+            if (isIsbnUniqueViolation(e)) {
+                throw new BookAlreadyRegisteredException();
+            }
+            throw e;
         }
+    }
+
+    /**
+     * 저장 시점의 무결성 위반을 ISBN 중복으로만 한정한다. 예전에는 모든 {@code DataIntegrityViolationException}을
+     * 409 "이미 등록된 도서"로 바꿔서, NOT NULL·길이 위반까지 중복 등록으로 둔갑했다 (ADR-0013). 등록 전에 이미
+     * {@code findByMemberIdAndIsbn}으로 중복을 걸러내므로 이 경로는 동시 등록 경합에 대한 방어선이다.
+     */
+    private static boolean isIsbnUniqueViolation(DataIntegrityViolationException e) {
+        for (Throwable cause = e.getCause(); cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation
+                    && ISBN_UNIQUE_INDEX.equalsIgnoreCase(violation.getConstraintName())) {
+                return true;
+            }
+        }
+        String message = e.getMessage();
+        return message != null && message.toLowerCase().contains(ISBN_UNIQUE_INDEX);
     }
 
     @Transactional(readOnly = true)

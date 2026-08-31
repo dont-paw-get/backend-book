@@ -368,3 +368,37 @@ prod overlay도 사용자 지시로 함께 바꿨다. prod는 현재 dev User Po
 검증은 `./gradlew test` 209개 통과. `kubectl` current-context가 설정돼 있지 않고 DEV 자격증명도 없어 **실제 발급 토큰 E2E(backend-auth 로그인 → Book 보호 GET → 200)는 수행하지 못했다** — 사용자와 사전에 "없으면 단위 테스트까지만 하고 명시한다"로 합의한 대로다. `integrationTest`는 테스트 실행 정책상 기본 검증 범위 밖이라 돌리지 않았다(`SecurityConfig`를 `@Import`하는 `SecurityConfigTest`는 단위 테스트에 포함되어 통과했다). 배포 매니페스트 검증은 `kubectl kustomize`로 dev·prod 양쪽 렌더링 결과를 확인했다.
 
 **다음 세션 시작 시**: 커밋하지 않았다(사용자 요청 없음). 남은 미검증 구간은 실제 Cognito JWKS 연동과 실토큰 클레임 형태뿐이며 `BACKLOG.md`에 항목으로 있다. ArgoCD가 `develop`/`k8s/overlays/dev`를 추적하므로 **ConfigMap 변경은 머지 후에야 dev에 반영된다** — 머지 전 E2E는 구 설정 기준이라 401이 나오는 게 정상이다.
+
+## 2026-08-31 (이어서): CLIAR-188 배포와 dev 검증
+
+머지 직후에도 401이 계속돼 원인을 좁혔다. 첫 확인에서는 **아직 머지 자체가 안 된 상태**였다 — `git ls-remote origin develop`가 세션 시작 때와 같은 `3939b1d`를 가리켰고, `git show origin/develop:k8s/overlays/dev/configmap-patch.yaml`에 옛 App Client(`245uq1…`)가 그대로 있었다. 원격을 직접 조회하지 않고 로컬 상태만 봤다면 놓쳤을 부분이다.
+
+이후 실제로 머지됐는데, **PR #21의 base가 `develop`이 아니라 `main`이었다.** 그래서 prod가 먼저(02:28), dev가 나중에(03:58) 반영됐다. 결과적으로 양쪽 다 수정이 들어가 깨진 건 없지만 브랜치 정책(`develop` → 검증 → `main`)과는 순서가 뒤집혔다.
+
+두 번째 401 조사에서 클러스터를 직접 봤다. prod는 이미 정상이었다(파드 내부 env `AUTH_APP_CLIENT_ID=du6sa…`, 이미지 `e14f15f`, 2/2 Running). 대신 **`dpyb-auth` prod가 21시간째 `Init:CrashLoopBackOff`(재시작 255회)**임을 발견했다 — `BACKLOG.md`에 있던 arm64 alembic 문제 그대로다. prod에는 로그인해서 토큰을 받을 수단 자체가 없다.
+
+dev는 kubeconfig에 컨텍스트가 없어 `aws eks update-kubeconfig --name dpyb-dev --profile dpgy-mfa`로 추가했다(`default` 프로필은 STS 토큰 만료 상태였고, 살아있는 건 `dpgy-mfa`/`dpgy-infra`다 — prod 컨텍스트도 `dpgy-mfa`를 쓴다). 확인해 보니 **dev 파드가 2분 48초 전에 막 롤아웃을 마친 상태**였다. 즉 사용자가 겪은 401은 롤아웃 이전 시점이었다. book·auth 양쪽 `client_id`와 User Pool이 일치하는 것까지 확인했고, 이후 사용자가 정상 동작을 확인했다.
+
+부수 수확: dev ALB에 가짜 Bearer를 보냈더니 빈 생성 실패(500)가 아니라 `invalid_token / Malformed token` 401이 돌아왔다. `@Lazy` JwtDecoder가 그 요청에서 생성되면서 Cognito OIDC discovery를 실제로 호출했다는 뜻이라, **로컬 서명 토큰 테스트로는 덮을 수 없던 JWKS 연동 구간이 이걸로 확인됐다.**
+
+또 하나 발견해 `BACKLOG.md`에 남겼다: 토큰이 **없을 때**는 통일 포맷 `{"code":"UNAUTHORIZED"}`가 나오지만, 토큰이 **있지만 유효하지 않을 때**는 Spring Security의 `BearerTokenAuthenticationFilter`가 자체 entry point를 써서 **본문이 빈 401**이 나간다. 프론트가 에러 코드로 분기하면 걸릴 수 있다. CLIAR-188 범위 밖이라 손대지 않았고, 사용자 판단 대기 중이다.
+
+**다음 세션 시작 시**: dev는 끝났다. 남은 것은 (1) prod 실토큰 E2E — `dpyb-auth` prod가 떠야 가능하고 이 저장소 소관이 아니다, (2) 위 빈 본문 401 처리 여부. 이 세션의 `.harness` 문서 갱신은 커밋하지 않았다. kubeconfig의 current-context가 **dev로 바뀌어 있다**(`kubectl config use-context dpyb-prod`로 복귀).
+
+## 2026-08-31 (이어서): API 계약과 구현 정합화 (ADR-0013)
+
+사용자가 "swagger 문서와 실제 명세가 다른 곳이 있는지" 확인을 요청했다. `openapi.yaml`을 Flyway V1~V9, JPA 엔티티, DTO, 컨트롤러와 대조한 감사부터 했고 세 갈래 불일치가 나왔다 — null 직렬화, 검증 부재, 개별 항목 2건. 사용자가 "명세를 구현에 맞춰 / Bean Validation 적용 / 개별 불일치도 해결"로 방향을 정했고, 결정 3건(D1 매핑 방식, D2 additionalProperties, D3 publishedDate 위치)을 확인받은 뒤 구현했다.
+
+감사 과정에서 **거짓 양성 두 개를 스스로 걸러낸 것이 중요했다.** 하나는 "어떤 쿼리에도 `deleted_at IS NULL`이 없어 삭제된 책이 조회된다"였는데, 네 엔티티 모두 `@SQLRestriction("deleted_at IS NULL")`이 붙어 Hibernate가 자동으로 붙이고 있었다. 다른 하나는 "도메인의 `IllegalArgumentException`이 500으로 나간다"였는데, 서비스가 이를 `InvalidBookDataException`으로 감싸고 있었다. 리포지토리와 서비스를 끝까지 열어보지 않았으면 둘 다 잘못 보고할 뻔했다.
+
+진짜 문제는 **생성 경로**였다. `LibraryBook.register`는 null 검증을 하지 않고, `LibraryBookService`가 `catch (DataIntegrityViolationException) → BookAlreadyRegisteredException`으로 모든 무결성 위반을 삼켜서 `title: null`이 400이 아니라 **409 "이미 등록된 도서"**로 나갈 수 있었다. 이 catch를 Hibernate `ConstraintViolationException`의 제약 이름(`uk_library_book_member_isbn`) 판정으로 좁혔다. 감사 시점에는 "예외 번역 경로까지는 확인 못 했다"고 명시했었는데, 이번에 테스트로 양쪽(ISBN 위반 → 409, 그 외 → 그대로 전파)을 고정했다.
+
+D1(검증 실패 → endpoint별 400 코드)이 이 작업의 설계 부담이었다. 계약이 400을 7개 코드로 나누는데 Bean Validation은 예외를 하나만 던진다. 요청 DTO 타입을 열쇠로 하는 매핑을 `common.exception.RequestValidationFailureTranslator`에 모았다 — `common`이 web DTO를 알게 되는 역방향 의존이 대가다. 컨트롤러 로컬 핸들러 방식은 `LibraryBookController` 하나가 4개 코드를 써서 결국 같은 매핑이 흩어질 뿐이라 접었다. 매핑 누락은 컴파일러가 못 잡으므로 클래스패스를 스캔해 매핑 없는 `*Request` DTO를 찾는 테스트를 넣었고, **스캔이 0건이어도 통과하는 허점이 있어 "최소 11개는 찾았다"는 검증을 덧붙였다.**
+
+기존 테스트 4개가 깨졌는데 둘 다 옛 계약을 고정하고 있던 것이었다. `LibraryBookControllerTest`의 update 페이로드 3개가 `genre`/`readingStatus`를 빠뜨리고 있었다 — 계약은 9개 필드 전체를 요구하는데(ADR-0006) 검증이 없어서 그동안 통과하던 것이다. `LibraryBookServiceTest`의 동시성 테스트는 제약 이름 없는 `DataIntegrityViolationException`을 던져 옛 포괄 catch에 기대고 있었다. 둘 다 새 계약에 맞게 고쳤다.
+
+작업 중 도구 문제를 하나 만났다: **Bash heredoc(`<<'EOF'`)이 백슬래시를 먹어치웠다.** `Pattern.compile(".*\.web\.dto\..*Request$")`가 `\.`로 깨져 컴파일 오류가 났다. 정규식은 문자 클래스(`[.]`)로 우회했고, 큰 Java 테스트 파일 2개는 Write 도구로 작성했다. 앞으로 백슬래시가 든 파일은 heredoc으로 쓰지 않는 게 안전하다.
+
+검증: `./gradlew test` **252개 통과**(작업 전 209개, +43). `integrationTest`는 테스트 정책상 기본 검증 범위 밖이라 실행하지 않았다.
+
+**다음 세션 시작 시**: 커밋하지 않았고 **브랜치도 만들지 않았다** — 티켓 번호를 받지 못해 `develop` 워킹트리에 변경이 그대로 있다. 커밋 전에 티켓 번호를 확인하고 `{티켓번호}-api-contract-alignment` 브랜치를 `develop`에서 만들어야 한다. 검증하지 않기로 한 항목(`format: uri`)과 그 이유는 ADR-0013과 DTO 주석에 남겼다.
