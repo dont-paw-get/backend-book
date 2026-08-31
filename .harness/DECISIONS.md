@@ -1,5 +1,14 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-31: 신뢰하는 Cognito App Client를 FE 앱 → backend-auth Backend App Client로 이동 (CLIAR-188)
+
+- **2026-08-19 결정의 전제가 바뀌었다.** 당시에는 "Book Service는 웹앱 하나에서만 호출된다"는 전제로 `client_id` 검증 대상을 **프론트엔드 App Client**로 잡았다(이 문서 아래 2026-08-19 항목). 그러나 최종 인증 구조는 프론트엔드가 Cognito와 직접 로그인하지 않는다 — `POST /api/v1/auth/login` → backend-auth → Cognito **Backend App Client** 순으로 발급된 Access Token이 그대로 `Authorization: Bearer`로 Book Service에 온다. backend-auth는 CLIAR-162 Phase 7에서 FE App Client 설정 자체를 코드·ConfigMap에서 제거하고 Backend App Client 하나로 통일했다. 따라서 Book Service가 신뢰해야 하는 App Client도 그쪽 하나다.
+- **증상은 "설정 하나 때문에 전량 401"이었다.** 검증 로직(issuer, `token_use==access`, `client_id`, `aud` 미검증)은 이미 요구 사항과 일치했고, `AUTH_APP_CLIENT_ID` 값만 폐기된 FE App Client를 가리키고 있었다. 서명·issuer·`token_use`를 모두 통과한 뒤 마지막 `client_id`에서 떨어지는 형태라 로그만 봐서는 원인이 인증 로직처럼 보이기 쉽다.
+- **과도기 dual-accept(구 FE + 신 Backend 동시 허용)를 두지 않는다.** 폐기된 App Client를 계속 신뢰하면 그 클라이언트로 발급된 토큰이 살아있는 동안 우회 경로가 남는다. backend-auth가 이미 단일 App Client로 전환을 끝냈으므로 과도기를 만들 이유도 없다. 최종 상태는 Backend App Client 단일 허용이다.
+- **설정 이름은 바꾸지 않는다(`AUTH_APP_CLIENT_ID` 유지).** 이미 특정 클라이언트 종류를 함의하지 않는 중립적 이름이고, 코드(`book-service.security.cognito.app-client-id`) ↔ `application.yaml` ↔ ConfigMap 3단이 일관돼 있다. rename은 세 곳을 동시에 바꾸면서 얻는 게 주석으로 대체 가능한 명확성뿐이라 하지 않았다. 대신 dev·prod overlay 주석에 "backend-auth의 `COGNITO_BACKEND_CLIENT_ID`와 반드시 같아야 한다"는 대응 관계를 적었다. App Client ID는 비밀값이 아니므로 계속 ConfigMap에 둔다(Client Secret은 backend-auth만 갖고 Book Service는 쓰지 않는다).
+- **검증 체인을 `CognitoAccessTokenValidator`로 뽑았다.** 기존에는 `SecurityConfig.jwtDecoder` 안에서 `DelegatingOAuth2TokenValidator`를 인라인으로 조합했는데, `SecurityConfigTest`가 `JwtDecoder`를 `@MockitoBean`으로 대체하므로 **그 조합을 지나는 테스트가 하나도 없었다**. validator 3개를 한 클래스로 묶어 프로덕션과 테스트가 같은 객체를 쓰게 했다 — 테스트가 배선의 복제본이 아니라 실제 배선을 검증한다. 테스트는 로컬 RSA 키쌍으로 토큰을 서명하고 `NimbusJwtDecoder.withPublicKey`로 디코딩해, Cognito JWKS/discovery 네트워크 호출 없이 결정론적으로 돈다.
+- **prod overlay도 같은 값으로 맞췄다.** prod는 현재 dev User Pool을 공용 중이라(아래 2026-08-27 관련 항목) 값이 같은 것이 정합적이다. 다만 backend-auth prod overlay에는 아직 `COGNITO_BACKEND_CLIENT_ID`가 없고 placeholder만 있어, 상용 전용 User Pool 전환 시 양쪽을 같은 작업에서 맞춰야 한다(`BACKLOG.md`).
+
 ## 2026-08-30 (계속): prod EKS 엔드포인트 공개 접근 유지, prod DB 비밀번호 교체
 
 - **prod EKS 클러스터 엔드포인트를 `publicAccessCidrs: 0.0.0.0/0`으로 유지한다.** 열려 있는 것은 Kubernetes API 서버(컨트롤 플레인)이고 서비스 트래픽 경로(ALB → 파드)와는 무관하다. 모든 요청은 AWS IAM 인증과 Kubernetes RBAC 두 관문을 통과해야 하므로 "누구나 조작 가능"한 상태는 아니다 — 자물쇠는 잠겨 있고 문 앞까지 올 수 있는 상태다. **감수하는 위험은 명확하다**: 공격 표면이 인터넷에 노출되고, IAM 자격증명이 유출되면 위치 제한 없이 즉시 악용된다. CIDR 제한이 대안이지만 팀이 고정 IP를 쓰지 않으면 재택·이동 때마다 목록을 고쳐야 해 실효가 없고, 잘못 적용하면 전원이 클러스터에서 잠긴다. private 전용 전환은 VPN·Bastion 등 접근 수단을 새로 만들어야 해 현 규모에 과하다. 팀의 고정 IP 정책이 생기면 재검토한다.
