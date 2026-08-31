@@ -8,19 +8,14 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
-import org.springframework.security.oauth2.core.OAuth2TokenValidator;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtDecoders;
-import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import tools.jackson.databind.ObjectMapper;
 
-import com.chc.dpgb.security.jwt.ClientIdValidator;
-import com.chc.dpgb.security.jwt.TokenUseValidator;
+import com.chc.dpgb.security.jwt.CognitoAccessTokenValidator;
 
 @Configuration
 @EnableWebSecurity
@@ -51,15 +46,10 @@ public class SecurityConfig {
     @Lazy
     public JwtDecoder jwtDecoder(
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuerUri,
-            @Value("${book-service.security.cognito.app-client-id}") String appClientId
+            @Value("${book-service.security.cognito.app-client-id}") String backendAppClientId
     ) {
         NimbusJwtDecoder decoder = (NimbusJwtDecoder) JwtDecoders.fromIssuerLocation(issuerUri);
-        OAuth2TokenValidator<Jwt> validator = new DelegatingOAuth2TokenValidator<>(
-                JwtValidators.createDefaultWithIssuer(issuerUri),
-                new TokenUseValidator(),
-                new ClientIdValidator(appClientId)
-        );
-        decoder.setJwtValidator(validator);
+        decoder.setJwtValidator(new CognitoAccessTokenValidator(issuerUri, backendAppClientId));
         return decoder;
     }
 

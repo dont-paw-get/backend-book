@@ -348,3 +348,23 @@ dev Aurora는 private 서브넷에 있어 로컬에서 직접 붙을 수 없고,
 작업용 임시 파드 `psql-dev2`는 삭제했다. 참고로 `pg_database_size`를 전체 DB에 돌리면 `rdsadmin`에서 권한 거부가 나므로 목록 조회 시 제외해야 한다.
 
 **다음 세션 시작 시**: dev Aurora 잔재 정리는 이것으로 끝났다(`BACKLOG.md`에서 항목 제거). 남은 DB 관련 미결은 **구 통합 `dpyb` 데이터베이스 정리**인데, 이건 auth·record 팀이 각자 Secret의 `DATABASE_URL`을 `dpyb_auth`/`dpyb_record`로 바꿔 전환을 마친 뒤에만 진행한다(`PLAN.md` B절). `.harness` 문서 갱신은 커밋하지 않았다.
+
+## 2026-08-31: backend-auth Backend App Client 기준으로 Access Token 검증 정렬 (CLIAR-188)
+
+사용자가 backend-auth의 Cognito App Client 정책 변경에 맞춰 Book Service의 JWT 검증 기준을 점검해 달라고 했다. 조사부터 시작했고, 결과는 "**검증 로직은 이미 맞고 신뢰 대상 값만 폐기된 것**"이었다.
+
+`SecurityConfig.jwtDecoder` → `application.yaml`의 `${AUTH_APP_CLIENT_ID}` → `k8s/overlays/{dev,prod}/configmap-patch.yaml` 순으로 값을 추적했더니, Book Service가 신뢰하도록 설정된 App Client가 **CLIAR-162 Phase 7에서 폐기된 프론트엔드 App Client**였다. 옆 저장소(`dpgy-auth`)의 `develop`과 dev overlay를 확인한 결과 backend-auth는 `COGNITO_BACKEND_CLIENT_ID`(Backend App Client) 하나로 통일을 끝냈고, `app/core/cognito_auth.py`의 모든 Cognito 호출이 `_require_backend_client_id()`를 거친다. issuer/User Pool(`ap-northeast-2_y1mKz50El`)은 양쪽이 이미 같았다. 즉 서명·issuer·`token_use`를 다 통과한 뒤 `client_id`에서만 떨어지는 상태 — 로그만 보면 인증 로직 문제처럼 읽히기 쉬운 형태였다.
+
+요구사항 중 "`aud`를 강제 검증하고 있으면 바로잡으라"는 항목은 해당 사항이 없었다. 코드 어디에도 `AudienceValidator`나 `audiences` 설정이 없고, `aud` 없는 Cognito Access Token이 그대로 통과한다(테스트로 명시적으로 고정해 뒀다).
+
+작업 중 발견한 더 근본적인 구멍: `SecurityConfigTest`가 `JwtDecoder`를 `@MockitoBean`으로 대체하기 때문에, `SecurityConfig.jwtDecoder`가 validator 3개를 `DelegatingOAuth2TokenValidator`로 조합하는 **그 배선을 지나는 테스트가 하나도 없었다.** 검증 조합을 `CognitoAccessTokenValidator` 한 클래스로 뽑아 프로덕션과 테스트가 같은 객체를 쓰게 했다 — 테스트가 배선의 복제본이 아니라 실제 배선을 검증하게 하려는 것이다. 테스트는 로컬 RSA 키쌍으로 토큰을 서명하고 `NimbusJwtDecoder.withPublicKey`로 디코딩해 JWKS/discovery 네트워크 호출 없이 결정론적으로 돈다.
+
+TDD 순서로 테스트를 먼저 썼지만 "구 FE client_id → 실패"는 **처음부터 green**이었다. 로직이 맞고 값만 틀린 상황이라 정상이며, 계획 단계에서 이 점을 미리 적어 두고 "red가 나오면 로직 가정이 틀린 것"으로 판단 기준을 잡아 뒀다. 만료 토큰 케이스는 처음에 한 번 실패했는데 프로덕션 문제가 아니라 테스트 픽스처의 실수였다 — `iat`(now-60s)를 `exp`(now-3600s)보다 뒤에 두는 바람에 만료 규칙에 닿기 전에 `expiresAt must be after issuedAt`으로 걸렸다. `iat`을 `exp` 기준으로 계산하게 고쳤다.
+
+prod overlay도 사용자 지시로 함께 바꿨다. prod는 현재 dev User Pool을 공용 중이라 같은 값이 정합적이다. 다만 **backend-auth prod overlay에는 아직 `COGNITO_BACKEND_CLIENT_ID`가 없다**(placeholder `COGNITO_CLIENT_ID`만 있음) — 상용 전용 User Pool 전환 시 두 저장소를 같은 작업에서 맞춰야 한다(`BACKLOG.md`에 적어 뒀다).
+
+설정 이름은 바꾸지 않았다(`AUTH_APP_CLIENT_ID` 유지). 이미 중립적이고 코드↔yaml↔ConfigMap 3단이 일관돼 rename으로 얻을 게 주석으로 대체 가능한 명확성뿐이었다. 대신 양쪽 overlay 주석에 backend-auth의 `COGNITO_BACKEND_CLIENT_ID`와 대응한다는 것을 근거와 함께 적었다.
+
+검증은 `./gradlew test` 209개 통과. `kubectl` current-context가 설정돼 있지 않고 DEV 자격증명도 없어 **실제 발급 토큰 E2E(backend-auth 로그인 → Book 보호 GET → 200)는 수행하지 못했다** — 사용자와 사전에 "없으면 단위 테스트까지만 하고 명시한다"로 합의한 대로다. `integrationTest`는 테스트 실행 정책상 기본 검증 범위 밖이라 돌리지 않았다(`SecurityConfig`를 `@Import`하는 `SecurityConfigTest`는 단위 테스트에 포함되어 통과했다). 배포 매니페스트 검증은 `kubectl kustomize`로 dev·prod 양쪽 렌더링 결과를 확인했다.
+
+**다음 세션 시작 시**: 커밋하지 않았다(사용자 요청 없음). 남은 미검증 구간은 실제 Cognito JWKS 연동과 실토큰 클레임 형태뿐이며 `BACKLOG.md`에 항목으로 있다. ArgoCD가 `develop`/`k8s/overlays/dev`를 추적하므로 **ConfigMap 변경은 머지 후에야 dev에 반영된다** — 머지 전 E2E는 구 설정 기준이라 401이 나오는 게 정상이다.
