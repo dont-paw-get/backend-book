@@ -217,4 +217,14 @@ class LibrarianControllerTest {
         mockMvc.perform(get("/api/v1/librarians"))
                 .andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void 사서_획득_요청에_type이_없으면_400_INVALID_LIBRARIAN_DATA() throws Exception {
+        mockMvc.perform(post("/api/v1/librarians")
+                        .with(member1Jwt())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"나비\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_LIBRARIAN_DATA"));
+    }
 }

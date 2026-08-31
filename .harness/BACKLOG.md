@@ -2,7 +2,8 @@
 
 - PostgreSQL 도입 규모가 커지면 벡터 검색 없이도 pgvector 확장을 Book Service가 쓸 일이 생길지 재검토 (현재는 RAG 서비스 전용으로 분리)
 - 사용자 업로드 이미지 파일 저장(서재 책 표지 교체, 스크랩 이미지 교체)은 오브젝트 스토리지(S3 등) 연동이 필요해 CLIAR-43(ADR-0003)에서 계약 범위 밖으로 뺐다. 파일 저장을 담당할 컴포넌트/서비스가 정해지면 endpoint를 다시 설계(`replaceLibraryBookCover`, `replaceScrapImage`가 이전 설계 참고용)
-- 실제로 발급된 Access Token으로의 E2E 확인이 아직 없다 — backend-auth 로그인 → `Authorization: Bearer` → Book Service 보호 GET → 200. DEV 자격증명이 없어 CLIAR-188에서 수행하지 못했다. 검증 기준 자체(issuer/만료/`token_use`/`client_id`/`aud` 미검증)는 `CognitoAccessTokenValidatorTest`가 로컬 RSA 서명 토큰으로 덮고 있으므로, 남은 미검증 구간은 **실제 Cognito JWKS/discovery 연동과 실토큰의 클레임 형태**뿐이다. 자격증명이 생기면 이 구간만 확인하면 된다.
+- **prod** 환경의 실토큰 E2E는 아직 확인하지 못했다 — dev는 2026-08-31 배포 후 정상 동작을 사용자가 확인했지만(CLIAR-188), prod는 `dpyb-auth`가 `Init:CrashLoopBackOff`(arm64 문제, 아래 항목)라 로그인 자체가 불가능해 토큰을 받을 수 없다. backend-book prod 쪽 설정은 이미 정상임을 파드 내부 env로 확인했다(`AUTH_APP_CLIENT_ID=du6sa…`, 이미지 `e14f15f`). auth prod가 뜨면 보호 GET 200만 확인하면 된다.
+- 토큰이 **있지만 유효하지 않을 때**의 401 응답 본문이 비어 있다 — 토큰이 아예 없을 때는 `JwtAuthenticationEntryPoint`가 `{"code":"UNAUTHORIZED"}` 통일 포맷을 주지만, 유효하지 않은 토큰은 Spring Security의 `BearerTokenAuthenticationFilter`가 자체 `BearerTokenAuthenticationEntryPoint`(빈 본문 + `WWW-Authenticate` 헤더)로 처리해 `SecurityConfig`의 `exceptionHandling` entry point를 타지 않는다(2026-08-31 dev ALB 실측). 프론트가 에러 코드로 분기한다면 문제가 될 수 있다. 고치려면 `oauth2ResourceServer`에도 같은 entry point를 등록하면 된다 — 다만 진단에 유용한 `WWW-Authenticate`의 `error_description`을 잃지 않도록 설계 확인 필요. CLIAR-188 범위 밖이라 손대지 않았다.
 - 다른 백엔드 MSA 컴포넌트가 Book Service API를 사용자 토큰 없이 M2M으로 직접 호출할 일이 생기면, Cognito Client Credentials 플로우 기반 인증을 별도로 설계(현재 `client_id` 검증은 backend-auth의 Backend App Client 하나만 허용한다 — CLIAR-188)
 - 로컬 개발 시 `.env` 파일(`ALADIN_API_TTB_KEY` 등)을 앱이 자동으로 읽지 않는다 — 여러 비밀값이 늘어나 매번 셸/IDE에 수동 export하는 게 번거로워지면 dotenv 로딩 도입 여부 검토(CLIAR-34)
 - `AladinBookDiscoveryClient`는 실제 Aladin 사용량 한도(초당/일일 호출 제한)에 대한 처리(재시도, 백오프, 캐싱)가 없다 — 실제 트래픽 확인 후 필요하면 재설계

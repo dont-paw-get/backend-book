@@ -7,6 +7,7 @@
 - Java 21, Spring Boot 4.1.0, Gradle Wrapper 9.5.1
 - Spring MVC, Spring Data JPA, Flyway(`flyway-core`, `flyway-database-postgresql` + Boot autoconfigure를 가져오는 `spring-boot-starter-flyway` — 이 starter 없이는 `FlywayAutoConfiguration`이 로드되지 않아 마이그레이션이 자동 실행되지 않는다, CLIAR-31에서 발견)
 - Spring Security OAuth2 Resource Server(`spring-boot-starter-oauth2-resource-server`) — JWT 검증, 인증 서비스는 AWS Cognito User Pool
+- Bean Validation(`spring-boot-starter-validation`) — 요청 DTO 제약이 `docs/api/openapi.yaml` 선언과 1:1로 대응한다. 검증은 web 경계(`@Valid` + 요청 DTO 애노테이션)에서만 하고 도메인은 자기 불변식만 지킨다. 검증 실패는 `RequestValidationFailureTranslator`가 요청 DTO 타입을 보고 endpoint별 400 코드로 옮긴다 (ADR-0013)
 - `spring-boot-starter-restclient` — `RestClient.Builder` 자동구성(`RestClientAutoConfiguration`)을 제공. `spring-boot-starter-webmvc`에 딸려오지 않아 별도 추가(CLIAR-34, Flyway 때와 동일한 Boot 4.1 세분화 모듈 패턴). 알라딘 API 연동(`AladinBookDiscoveryClient`)에서 사용
 - 기준 패키지: `com.chc.dpgb`
 - DB: PostgreSQL (JDBC 드라이버 `org.postgresql:postgresql`, 스키마는 Flyway migration으로 관리, `spring.jpa.hibernate.ddl-auto: validate`)
@@ -97,6 +98,10 @@ src/main/java/com/chc/dpgb
 │     ├─ LibrarianController.java        # GET /api/v1/librarian-types, POST/GET /api/v1/librarians, PATCH/DELETE /{librarianId}, PATCH /{librarianId}/representative, GET /representative
 │     └─ dto                             # AcquireLibrarianRequest/Response, LibrarianListResponse/LibrarianSummary, RenameLibrarianRequest/Response, RepresentativeLibrarianResponse, LibrarianTypeListResponse/LibrarianTypeSummary — openapi 스키마 1:1
 │  ※ LibrarianLevel(레벨별 필요 경험치 정책)은 JPA 엔티티로 만들지 않았다 — 레벨업 로직이 범위 밖이라 앱 코드가 조회하지 않는다. DB 테이블/FK만 V9 마이그레이션으로 존재(YAGNI, 필요해지면 추가)
+├─ common
+│  └─ exception
+│     ├─ GlobalExceptionHandler.java          # 도메인 예외 5종 + Bean Validation 실패 + 그 외(500) → ErrorResponse
+│     └─ RequestValidationFailureTranslator.java  # 요청 DTO 타입 → endpoint별 400 코드 (ADR-0013)
 └─ security
    ├─ SecurityConfig.java             # JwtDecoder/SecurityFilterChain/AuthenticationEntryPoint 빈
    ├─ JwtAuthenticationEntryPoint.java

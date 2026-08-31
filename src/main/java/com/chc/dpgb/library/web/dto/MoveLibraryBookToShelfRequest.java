@@ -1,4 +1,7 @@
 package com.chc.dpgb.library.web.dto;
 
-public record MoveLibraryBookToShelfRequest(Long shelfId) {
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
+
+public record MoveLibraryBookToShelfRequest(@NotNull @Min(1) Long shelfId) {
 }

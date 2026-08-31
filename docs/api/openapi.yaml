@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Virtual Shelf Book Service API
-  version: 0.9.0
+  version: 0.10.0
   description: |
     Virtual Shelf MSA의 Book Service 계약이다.
     알라딘 API 기반 외부 도서 검색, 개인 서재 관리, 독서 진도, 문장 스크랩, 동물 사서를 제공한다.
@@ -1088,7 +1088,7 @@ components:
     ExternalBook:
       type: object
       additionalProperties: false
-      required: [title, author]
+      required: [title, author, isbn, publisher, publishedDate, totalPages, coverUrl]
       properties:
         title:
           type: string
@@ -1103,37 +1103,43 @@ components:
             서버가 "(지은이)", "(옮긴이)", "(편역)" 등 역할 라벨을 제거하고 이름만 남긴 뒤,
             저자가 여럿이면 쉼표로 구분해 반환한다.
         isbn:
-          type: string
+          type: [string, "null"]
           pattern: "^(?:[0-9]{10}|[0-9]{13})$"
         publisher:
-          type: string
+          type: [string, "null"]
           maxLength: 100
         publishedDate:
-          type: string
+          type: [string, "null"]
           format: date
         totalPages:
-          type: integer
+          type: [integer, "null"]
           format: int32
           minimum: 1
           description: 알라딘 API가 대부분의 도서에서 제공하지 않는 값이다. 없으면 생략되며, 이 경우 사용자가 서재 등록 시 직접 입력해야 한다.
         coverUrl:
-          type: string
+          type: [string, "null"]
           format: uri
 
     BookSearchResponse:
       type: object
       additionalProperties: false
-      required: [alreadyRegistered]
+      required: [alreadyRegistered, libraryBook, book]
       properties:
         alreadyRegistered:
           type: boolean
           description: 로그인 사용자의 서재에 이미 이 isbn으로 등록된 책이 있으면 true
         libraryBook:
-          $ref: "#/components/schemas/LibraryBookDetailResponse"
-          description: alreadyRegistered가 true일 때만 존재 — 이미 저장된 도서 데이터
+          oneOf:
+            - $ref: "#/components/schemas/LibraryBookDetailResponse"
+            - type: "null"
+          description: 이미 저장된 도서 데이터. alreadyRegistered가 false면 null이다 (키 자체는 항상 존재한다)
         book:
-          $ref: "#/components/schemas/ExternalBook"
-          description: alreadyRegistered가 false이고 알라딘에서 해당 isbn을 찾았을 때만 존재. 알라딘에도 없으면 생략되며, 사용자가 직접 입력하는 폴백으로 이어진다
+          oneOf:
+            - $ref: "#/components/schemas/ExternalBook"
+            - type: "null"
+          description: |
+            알라딘에서 조회한 도서 데이터. alreadyRegistered가 true이거나 알라딘에도 해당 isbn이 없으면
+            null이며, 후자는 사용자가 직접 입력하는 폴백으로 이어진다 (키 자체는 항상 존재한다)
 
     Genre:
       type: string
@@ -1167,7 +1173,6 @@ components:
 
     CreateLibraryBookRequest:
       type: object
-      additionalProperties: false
       required: [title, author]
       properties:
         title:
@@ -1252,7 +1257,7 @@ components:
     LibraryBookSummary:
       type: object
       additionalProperties: false
-      required: [bookId, shelfId, shelfRank, title, author, genre, readingStatus, progress]
+      required: [bookId, shelfId, shelfRank, title, author, genre, readingStatus, coverUrl, progress]
       properties:
         bookId:
           type: integer
@@ -1273,7 +1278,7 @@ components:
         readingStatus:
           $ref: "#/components/schemas/ReadingStatus"
         coverUrl:
-          type: string
+          type: [string, "null"]
           format: uri
         progress:
           type: [number, "null"]
@@ -1311,16 +1316,7 @@ components:
     LibraryBookDetailResponse:
       type: object
       additionalProperties: false
-      required:
-        - bookId
-        - shelfId
-        - shelfRank
-        - title
-        - author
-        - genre
-        - readingStatus
-        - currentPage
-        - progress
+      required: [bookId, shelfId, shelfRank, title, author, isbn, genre, publisher, publishedDate, totalPages, coverUrl, readingStatus, currentPage, progress]
       properties:
         bookId:
           type: integer
@@ -1337,18 +1333,21 @@ components:
         author:
           type: string
         isbn:
-          type: string
+          type: [string, "null"]
           pattern: "^(?:[0-9]{10}|[0-9]{13})$"
         genre:
           $ref: "#/components/schemas/Genre"
         publisher:
-          type: string
+          type: [string, "null"]
+        publishedDate:
+          type: [string, "null"]
+          format: date
         totalPages:
           type: [integer, "null"]
           format: int32
           minimum: 1
         coverUrl:
-          type: string
+          type: [string, "null"]
           format: uri
         readingStatus:
           $ref: "#/components/schemas/ReadingStatus"
@@ -1365,7 +1364,6 @@ components:
 
     UpdateLibraryBookRequest:
       type: object
-      additionalProperties: false
       required: [title, author, isbn, genre, publisher, publishedDate, coverUrl, readingStatus, totalPages]
       properties:
         title:
@@ -1404,7 +1402,7 @@ components:
     UpdateLibraryBookResponse:
       type: object
       additionalProperties: false
-      required: [bookId, shelfRank, title, genre, readingStatus, updatedAt]
+      required: [bookId, shelfRank, title, genre, coverUrl, readingStatus, totalPages, updatedAt]
       properties:
         bookId:
           type: integer
@@ -1417,7 +1415,7 @@ components:
         genre:
           $ref: "#/components/schemas/Genre"
         coverUrl:
-          type: string
+          type: [string, "null"]
           format: uri
         readingStatus:
           $ref: "#/components/schemas/ReadingStatus"
@@ -1431,7 +1429,6 @@ components:
 
     ReorderLibraryBookRequest:
       type: object
-      additionalProperties: false
       minProperties: 1
       maxProperties: 1
       properties:
@@ -1464,7 +1461,6 @@ components:
 
     MoveLibraryBookToShelfRequest:
       type: object
-      additionalProperties: false
       required: [shelfId]
       properties:
         shelfId:
@@ -1494,7 +1490,6 @@ components:
 
     CreateShelfRequest:
       type: object
-      additionalProperties: false
       required: [name]
       properties:
         name:
@@ -1551,7 +1546,6 @@ components:
 
     UpdateShelfRequest:
       type: object
-      additionalProperties: false
       required: [name]
       properties:
         name:
@@ -1578,7 +1572,6 @@ components:
 
     UpdateReadingProgressRequest:
       type: object
-      additionalProperties: false
       required: [currentPage]
       properties:
         currentPage:
@@ -1595,7 +1588,7 @@ components:
     UpdateReadingProgressResponse:
       type: object
       additionalProperties: false
-      required: [bookId, currentPage, progress, updatedAt]
+      required: [bookId, currentPage, totalPages, progress, updatedAt]
       properties:
         bookId:
           type: integer
@@ -1621,7 +1614,6 @@ components:
 
     CreateScrapRequest:
       type: object
-      additionalProperties: false
       required: [sentence, scrapImageUrl]
       properties:
         sentence:
@@ -1641,7 +1633,6 @@ components:
 
     UpdateScrapRequest:
       type: object
-      additionalProperties: false
       required: [sentence, pageNumber, scrapImageUrl, memo]
       properties:
         sentence:
@@ -1665,7 +1656,7 @@ components:
     ScrapSummary:
       type: object
       additionalProperties: false
-      required: [scrapId, sentence, scrapImageUrl, createdAt]
+      required: [scrapId, sentence, pageNumber, scrapImageUrl, createdAt]
       properties:
         scrapId:
           type: integer
@@ -1674,7 +1665,7 @@ components:
         sentence:
           type: string
         pageNumber:
-          type: integer
+          type: [integer, "null"]
           format: int32
           minimum: 1
         scrapImageUrl:
@@ -1713,7 +1704,7 @@ components:
     ScrapDetailResponse:
       type: object
       additionalProperties: false
-      required: [scrapId, bookId, sentence, scrapImageUrl, createdAt, updatedAt]
+      required: [scrapId, bookId, sentence, pageNumber, scrapImageUrl, memo, createdAt, updatedAt]
       properties:
         scrapId:
           type: integer
@@ -1773,7 +1764,6 @@ components:
 
     AcquireLibrarianRequest:
       type: object
-      additionalProperties: false
       required: [type, name]
       properties:
         type:
@@ -1847,7 +1837,6 @@ components:
 
     RenameLibrarianRequest:
       type: object
-      additionalProperties: false
       required: [name]
       properties:
         name:

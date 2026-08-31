@@ -2,6 +2,7 @@ package com.chc.dpgb.library.web;
 
 import java.util.UUID;
 
+import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
@@ -51,7 +52,7 @@ public class LibraryBookController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public CreateLibraryBookResponse createLibraryBook(
-            @AuthenticationPrincipal Jwt jwt, @RequestBody CreateLibraryBookRequest request
+            @AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateLibraryBookRequest request
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         LibraryBook book = libraryBookService.createLibraryBook(
@@ -93,7 +94,7 @@ public class LibraryBookController {
     @PatchMapping("/{bookId}")
     public UpdateLibraryBookResponse updateLibraryBook(
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
-            @RequestBody UpdateLibraryBookRequest request
+            @Valid @RequestBody UpdateLibraryBookRequest request
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         LibraryBook book = libraryBookService.updateLibraryBook(
@@ -114,7 +115,7 @@ public class LibraryBookController {
     @PatchMapping("/{bookId}/order")
     public ReorderLibraryBookResponse reorderLibraryBook(
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
-            @RequestBody ReorderLibraryBookRequest request
+            @Valid @RequestBody ReorderLibraryBookRequest request
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         LibraryBook book = libraryBookService.reorderLibraryBook(
@@ -126,7 +127,7 @@ public class LibraryBookController {
     @PatchMapping("/{bookId}/shelf")
     public MoveLibraryBookToShelfResponse moveLibraryBookToShelf(
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
-            @RequestBody MoveLibraryBookToShelfRequest request
+            @Valid @RequestBody MoveLibraryBookToShelfRequest request
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         if (request.shelfId() == null) {
@@ -139,7 +140,7 @@ public class LibraryBookController {
     @PatchMapping("/{bookId}/progress")
     public UpdateReadingProgressResponse updateReadingProgress(
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long bookId,
-            @RequestBody UpdateReadingProgressRequest request
+            @Valid @RequestBody UpdateReadingProgressRequest request
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         if (request.currentPage() == null) {

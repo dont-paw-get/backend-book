@@ -2,6 +2,7 @@ package com.chc.dpgb.librarian.web;
 
 import java.util.UUID;
 
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -43,7 +44,7 @@ public class LibrarianController {
     @PostMapping("/api/v1/librarians")
     @ResponseStatus(HttpStatus.CREATED)
     public AcquireLibrarianResponse acquireLibrarian(
-            @AuthenticationPrincipal Jwt jwt, @RequestBody AcquireLibrarianRequest request
+            @AuthenticationPrincipal Jwt jwt, @Valid @RequestBody AcquireLibrarianRequest request
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         if (request.type() == null) {
@@ -62,7 +63,7 @@ public class LibrarianController {
     @PatchMapping("/api/v1/librarians/{librarianId}")
     public RenameLibrarianResponse renameLibrarian(
             @AuthenticationPrincipal Jwt jwt, @PathVariable Long librarianId,
-            @RequestBody RenameLibrarianRequest request
+            @Valid @RequestBody RenameLibrarianRequest request
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         Librarian librarian = librarianService.renameLibrarian(memberId, librarianId, request.name());

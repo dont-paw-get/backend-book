@@ -1,5 +1,16 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-08-31 (계속): 요청 검증 계층 도입과 검증 실패의 에러 코드 매핑
+
+계약 자체의 결정(어떤 필드가 nullable인지, 왜 명세를 구현에 맞췄는지)은 `docs/api/decisions/0013-null-serialization-and-request-validation.md`가 소유한다. 여기에는 그 결정을 코드로 옮기면서 내린 **구조 결정만** 남긴다.
+
+- **Bean Validation을 도입한다(`spring-boot-starter-validation`).** 그동안 명세의 `required`/`minLength`/`maxLength`/`pattern`/`minimum`이 런타임에 하나도 강제되지 않았고, 도메인 계층이 일부(수정 경로의 null 검사)만 막고 있었다. 검증을 web 경계로 올려, 도메인은 계속 자기 불변식만 지키게 한다.
+- **검증 실패 → 도메인 예외 매핑을 `RequestValidationFailureTranslator` 한 곳에 모았다.** 계약이 400을 endpoint별로 7개 코드로 나누는데 Bean Validation은 `MethodArgumentNotValidException` 하나만 던진다. 요청 DTO 타입을 열쇠로 삼는 방식을 골랐다 — **대가는 `common.exception`이 web DTO 타입을 알게 되는 역방향 의존**이다. 대안이던 "컨트롤러마다 로컬 `@ExceptionHandler`"는 `LibraryBookController` 하나가 4개 코드를 쓰기 때문에 결국 같은 매핑이 컨트롤러 안으로 흩어질 뿐이었고, "공통 코드 신설"은 프론트엔드의 기존 코드 분기를 깨뜨린다. 매핑이 한 곳에 모여 눈으로 대조 가능한 편이 낫다고 봤다.
+- **매핑에 없는 요청 타입은 400을 지어내지 않고 500으로 흘려보낸다.** 조용히 그럴듯한 코드로 덮으면 매핑 누락이 영영 드러나지 않는다. 대신 `RequestValidationFailureTranslatorTest`가 클래스패스를 스캔해 매핑 없는 `*Request` DTO가 있으면 실패한다 — 컴파일러가 못 잡는 자리를 테스트로 막았다.
+- **`ErrorResponse`에 필드별 위반 상세를 넣지 않는다.** 계약이 `{code, message}` 두 필드로 고정돼 있어 상세 배열을 추가하면 계약 변경이다. 검증 실패 메시지는 각 도메인 예외의 기본 한국어 메시지를 그대로 쓴다 — Hibernate Validator의 기본 메시지는 JVM 로케일에 따라 영어가 될 수 있어 계약의 "사용자에게 표시 가능한 한국어" 요구를 만족하지 못한다.
+- **`DataIntegrityViolationException` 포괄 catch를 ISBN 유일성 위반으로 좁혔다.** 예전에는 저장 시 모든 무결성 위반을 409 "이미 등록된 도서"로 바꿔서, NOT NULL·길이 위반까지 중복 등록으로 둔갑했다. Hibernate `ConstraintViolationException`의 제약 이름(`uk_library_book_member_isbn`)으로 판정하고, 이름을 얻지 못하는 경로를 대비해 메시지 문자열 대조를 폴백으로 둔다. **이 상수는 V7 마이그레이션의 인덱스 이름과 함께 바뀌어야 한다.**
+- **`coverUrl`/`scrapImageUrl`의 `format: uri`는 제약으로 옮기지 않았다.** 표준 애노테이션이 없고 Hibernate Validator의 `@URL`은 OpenAPI의 `uri`보다 좁다(상대 경로·data URI 거부). 현재 프론트가 무엇을 보내는지 확인하지 못한 상태에서 거부 규칙을 넣으면 멀쩡한 요청을 막을 수 있어, 검증하지 않는 쪽을 택하고 이 사실을 DTO 주석과 ADR에 남겼다.
+
 ## 2026-08-31: 신뢰하는 Cognito App Client를 FE 앱 → backend-auth Backend App Client로 이동 (CLIAR-188)
 
 - **2026-08-19 결정의 전제가 바뀌었다.** 당시에는 "Book Service는 웹앱 하나에서만 호출된다"는 전제로 `client_id` 검증 대상을 **프론트엔드 App Client**로 잡았다(이 문서 아래 2026-08-19 항목). 그러나 최종 인증 구조는 프론트엔드가 Cognito와 직접 로그인하지 않는다 — `POST /api/v1/auth/login` → backend-auth → Cognito **Backend App Client** 순으로 발급된 Access Token이 그대로 `Authorization: Bearer`로 Book Service에 온다. backend-auth는 CLIAR-162 Phase 7에서 FE App Client 설정 자체를 코드·ConfigMap에서 제거하고 Backend App Client 하나로 통일했다. 따라서 Book Service가 신뢰해야 하는 App Client도 그쪽 하나다.
