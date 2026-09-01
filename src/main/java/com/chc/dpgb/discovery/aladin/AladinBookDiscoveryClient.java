@@ -6,6 +6,8 @@ import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
@@ -20,6 +22,12 @@ import com.chc.dpgb.discovery.ExternalBook;
 @Component
 @Lazy
 class AladinBookDiscoveryClient implements BookDiscoveryClient {
+
+    /**
+     * 요청 URI는 쿼리스트링에 TTBKey(비밀값)를 담고 있으므로 어떤 로그에도 남기지 않는다. 실패 로그에는 isbn과 알라딘이
+     * 돌려준 errorCode/errorMessage만 남긴다.
+     */
+    private static final Logger log = LoggerFactory.getLogger(AladinBookDiscoveryClient.class);
 
     private static final String LOOKUP_URL = "https://www.aladin.co.kr/ttb/api/ItemLookUp.aspx";
 
@@ -49,16 +57,22 @@ class AladinBookDiscoveryClient implements BookDiscoveryClient {
                     .retrieve()
                     .body(AladinSearchResponse.class);
         } catch (RestClientException e) {
+            log.warn("알라딘 ItemLookUp 호출 실패 isbn={}", isbn, e);
             throw new AladinApiException();
         }
 
         if (response == null) {
+            log.warn("알라딘 ItemLookUp 응답 본문이 비어 있음 isbn={}", isbn);
             throw new AladinApiException();
         }
         if (response.errorCode() != null) {
             if (response.errorCode() == ERROR_CODE_ITEM_NOT_FOUND) {
                 return Optional.empty();
             }
+            log.warn(
+                    "알라딘 ItemLookUp 오류 응답 isbn={} errorCode={} errorMessage={}",
+                    isbn, response.errorCode(), response.errorMessage()
+            );
             throw new AladinApiException();
         }
 

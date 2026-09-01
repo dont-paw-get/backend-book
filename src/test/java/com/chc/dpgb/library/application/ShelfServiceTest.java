@@ -11,10 +11,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import com.chc.dpgb.common.exception.DefaultShelfCannotBeDeletedException;
@@ -78,6 +82,29 @@ class ShelfServiceTest {
     }
 
     @Test
+    void 기본_책장_동시_생성_경합_로그에는_memberId를_남기지_않는다() {
+        ListAppender<ILoggingEvent> logs = captureLogs();
+        try {
+            Shelf createdByRace = Shelf.create(MEMBER_1, "기본 책장", true);
+            when(shelfRepository.findDefaultShelf(MEMBER_1))
+                    .thenReturn(Optional.empty())
+                    .thenReturn(Optional.of(createdByRace));
+            when(shelfRepository.save(any(Shelf.class)))
+                    .thenThrow(new DataIntegrityViolationException("duplicate"));
+
+            shelfService.getOrCreateDefaultShelf(MEMBER_1);
+
+            assertThat(logMessages(logs))
+                    .containsExactly("기본 책장 동시 생성 경합 — 기존 책장 재조회")
+                    .allSatisfy(message -> assertThat(message)
+                            .doesNotContain("memberId")
+                            .doesNotContain(MEMBER_1.toString()));
+        } finally {
+            detach(logs);
+        }
+    }
+
+    @Test
     void 책장_목록_조회는_기본_책장을_먼저_만들어_둔다() {
         when(shelfRepository.findDefaultShelf(MEMBER_1)).thenReturn(Optional.empty());
         when(shelfRepository.save(any(Shelf.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -123,5 +150,22 @@ class ShelfServiceTest {
 
         assertThatThrownBy(() -> shelfService.deleteShelf(MEMBER_1, 1L))
                 .isInstanceOf(DefaultShelfCannotBeDeletedException.class);
+    }
+
+    private static ListAppender<ILoggingEvent> captureLogs() {
+        Logger logger = (Logger) LoggerFactory.getLogger(ShelfService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private static void detach(ListAppender<ILoggingEvent> appender) {
+        Logger logger = (Logger) LoggerFactory.getLogger(ShelfService.class);
+        logger.detachAppender(appender);
+    }
+
+    private static List<String> logMessages(ListAppender<ILoggingEvent> appender) {
+        return appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
     }
 }

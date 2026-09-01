@@ -13,6 +13,42 @@ spring:
         jwt:
           issuer-uri: ${AUTH_ISSUER_URI}
 
+# 관측(Observability) 공통 기본값. 실제 OTLP export는 배포 환경(prod 프로필)에서만 켠다.
+management:
+  opentelemetry:
+    # OTEL_SERVICE_NAME / OTEL_RESOURCE_ATTRIBUTES 환경변수가 있으면 그쪽이 이 값을 덮는다
+    # (spring-boot-opentelemetry의 OpenTelemetryEnvironmentVariableEnvironmentPostProcessor).
+    # 환경변수가 없는 로컬 실행에서도 service.name이 배포 환경과 같도록 기본값을 둔다.
+    resource-attributes:
+      service.name: backend-book
+  tracing:
+    # 기본은 꺼짐 — 로컬 개발과 테스트에서 OpenTelemetry Collector 없이도 export 실패 로그 없이 기동한다.
+    # 트레이스 컨텍스트(traceId/spanId) 생성과 MDC 주입은 이 설정과 무관하게 계속 동작하므로,
+    # Collector가 없어도 로그의 trace_id로 같은 요청의 로그를 묶어 볼 수 있다.
+    export:
+      enabled: false
+    sampling:
+      # 로컬/테스트 기본값은 전량 수집이다. 배포 환경은 k8s overlay의
+      # MANAGEMENT_TRACING_SAMPLING_PROBABILITY 환경변수로 dev=1.0, prod=0.1을 지정한다.
+      # sampling을 낮춰도 W3C trace context propagation 자체는 계속 유지한다.
+      probability: 1.0
+  otlp:
+    metrics:
+      export:
+        # spring-boot-starter-opentelemetry가 micrometer-registry-otlp를 함께 끌고 오지만
+        # 이번 범위는 로그·트레이스뿐이다. 켜두면 Collector 없는 환경에서 주기적 push 실패가 쌓인다.
+        enabled: false
+
+# JDBC 구간 span(datasource-micrometer). Micrometer Observation이 JDBC를 계측하지 않아 이 라이브러리를 쓴다.
+jdbc:
+  datasource-proxy:
+    # 바인딩 파라미터 값에는 회원 정보가 그대로 들어갈 수 있다. 라이브러리 기본값도 false지만,
+    # 민감정보를 span 속성으로 내보내지 않는다는 것은 정책이므로 명시해서 고정한다.
+    include-parameter-values: false
+    query:
+      # 쿼리 전문을 로그로도 남기지 않는다 — 진단은 span으로 한다(로그 폭증 방지).
+      enable-logging: false
+
 book-service:
   security:
     cognito:

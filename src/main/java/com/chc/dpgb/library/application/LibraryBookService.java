@@ -5,6 +5,10 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -30,21 +34,33 @@ import com.chc.dpgb.library.domain.ShelfRankExhaustedException;
 @Service
 public class LibraryBookService {
 
+    private static final Logger log = LoggerFactory.getLogger(LibraryBookService.class);
+
+    /**
+     * rebalance는 드물게 일어나지만 한 요청 안에서 책장 전체를 다시 저장한다. 자동 계측만 보면 평소와 똑같은 요청이 갑자기
+     * 수십 건의 UPDATE span을 쏟아낸 것처럼 보이므로, 그 이유를 span 이름으로 드러낸다.
+     */
+    private static final String REBALANCE_OBSERVATION_NAME = "library.shelf.rebalance";
+    private static final String REBALANCE_BOOK_COUNT_KEY = "library.shelf.book_count";
+
     private final LibraryBookRepository libraryBookRepository;
     private final ShelfRepository shelfRepository;
     private final ShelfService shelfService;
     private final ScrapService scrapService;
+    private final ObservationRegistry observationRegistry;
 
     LibraryBookService(
             LibraryBookRepository libraryBookRepository,
             ShelfRepository shelfRepository,
             ShelfService shelfService,
-            ScrapService scrapService
+            ScrapService scrapService,
+            ObservationRegistry observationRegistry
     ) {
         this.libraryBookRepository = libraryBookRepository;
         this.shelfRepository = shelfRepository;
         this.shelfService = shelfService;
         this.scrapService = scrapService;
+        this.observationRegistry = observationRegistry;
     }
 
     @Transactional
@@ -87,11 +103,21 @@ public class LibraryBookService {
             throw new InvalidBookDataException(e.getMessage());
         }
 
+        LibraryBook saved;
         try {
-            return libraryBookRepository.save(book);
+            saved = libraryBookRepository.save(book);
         } catch (DataIntegrityViolationException e) {
+            // 위 findByMemberIdAndIsbn 검사를 통과했는데도 unique 제약에 걸렸다는 뜻 — 동시 등록 경합이다.
+            log.warn(
+                    "서재 책 등록 경합으로 중복 판정 shelfId={}", shelf.getShelfId()
+            );
             throw new BookAlreadyRegisteredException();
         }
+        log.info(
+                "서재 책 등록 bookId={} shelfId={} hasIsbn={}",
+                saved.getBookId(), saved.getShelfId(), isbn != null
+        );
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -152,7 +178,8 @@ public class LibraryBookService {
         Instant now = Instant.now();
         book.softDelete(now);
         libraryBookRepository.save(book);
-        scrapService.softDeleteAllByBookId(bookId, now);
+        int deletedScraps = scrapService.softDeleteAllByBookId(bookId, now);
+        log.info("서재 책 삭제 bookId={} deletedScraps={}", bookId, deletedScraps);
     }
 
     @Transactional
@@ -266,11 +293,24 @@ public class LibraryBookService {
     }
 
     private void rebalanceShelf(Long shelfId) {
-        List<LibraryBook> books = libraryBookRepository.findShelfOrderedByRank(shelfId);
-        String[] newRanks = ShelfRank.rebalancedSequence(books.size());
-        for (int i = 0; i < books.size(); i++) {
-            books.get(i).changeShelfRank(newRanks[i]);
-            libraryBookRepository.save(books.get(i));
+        Observation observation = Observation.start(REBALANCE_OBSERVATION_NAME, observationRegistry);
+        try (Observation.Scope ignored = observation.openScope()) {
+            List<LibraryBook> books = libraryBookRepository.findShelfOrderedByRank(shelfId);
+            // 책 수는 값의 종류가 많아 메트릭 태그로는 부적절하다 — span 속성으로만 남긴다.
+            observation.highCardinalityKeyValue(REBALANCE_BOOK_COUNT_KEY, String.valueOf(books.size()));
+            log.warn(
+                    "shelfRank 키 공간 소진으로 책장 재정렬 shelfId={} bookCount={}", shelfId, books.size()
+            );
+            String[] newRanks = ShelfRank.rebalancedSequence(books.size());
+            for (int i = 0; i < books.size(); i++) {
+                books.get(i).changeShelfRank(newRanks[i]);
+                libraryBookRepository.save(books.get(i));
+            }
+        } catch (RuntimeException e) {
+            observation.error(e);
+            throw e;
+        } finally {
+            observation.stop();
         }
     }
 

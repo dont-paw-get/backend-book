@@ -11,11 +11,16 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import com.chc.dpgb.common.exception.BookAlreadyRegisteredException;
@@ -54,7 +59,7 @@ class LibraryBookServiceTest {
     @BeforeEach
     void setUp() {
         libraryBookService = new LibraryBookService(
-                libraryBookRepository, shelfRepository, shelfService, scrapService
+                libraryBookRepository, shelfRepository, shelfService, scrapService, ObservationRegistry.NOOP
         );
     }
 
@@ -177,6 +182,31 @@ class LibraryBookServiceTest {
     }
 
     @Test
+    void 동시_등록_경합_로그에는_memberId를_남기지_않는다() {
+        ListAppender<ILoggingEvent> logs = captureLogs();
+        try {
+            Shelf shelf = Shelf.create(MEMBER_1, "책장", false);
+            setShelfId(shelf, 1L);
+            when(shelfRepository.findById(1L)).thenReturn(Optional.of(shelf));
+            when(libraryBookRepository.findLastRanked(1L)).thenReturn(Optional.empty());
+            when(libraryBookRepository.save(any(LibraryBook.class)))
+                    .thenThrow(new DataIntegrityViolationException("duplicate"));
+
+            assertThatThrownBy(() -> libraryBookService.createLibraryBook(
+                    MEMBER_1, 1L, "제목", "저자", null, null, null, null, null, null, 100
+            )).isInstanceOf(BookAlreadyRegisteredException.class);
+
+            assertThat(logMessages(logs))
+                    .containsExactly("서재 책 등록 경합으로 중복 판정 shelfId=1")
+                    .allSatisfy(message -> assertThat(message)
+                            .doesNotContain("memberId")
+                            .doesNotContain(MEMBER_1.toString()));
+        } finally {
+            detach(logs);
+        }
+    }
+
+    @Test
     void 존재하지_않는_책을_조회하면_404() {
         when(libraryBookRepository.findById(1L)).thenReturn(Optional.empty());
 
@@ -202,6 +232,26 @@ class LibraryBookServiceTest {
         assertThat(book.isDeleted()).isTrue();
         verify(libraryBookRepository).save(book);
         verify(scrapService).softDeleteAllByBookId(eq(1L), any());
+    }
+
+    @Test
+    void 책_삭제_로그에는_memberId를_남기지_않는다() {
+        ListAppender<ILoggingEvent> logs = captureLogs();
+        try {
+            LibraryBook book = book(1L, MEMBER_1, 1L, "m");
+            when(libraryBookRepository.findById(1L)).thenReturn(Optional.of(book));
+            when(scrapService.softDeleteAllByBookId(eq(1L), any())).thenReturn(2);
+
+            libraryBookService.deleteLibraryBook(MEMBER_1, 1L);
+
+            assertThat(logMessages(logs))
+                    .containsExactly("서재 책 삭제 bookId=1 deletedScraps=2")
+                    .allSatisfy(message -> assertThat(message)
+                            .doesNotContain("memberId")
+                            .doesNotContain(MEMBER_1.toString()));
+        } finally {
+            detach(logs);
+        }
     }
 
     @Test
@@ -292,5 +342,22 @@ class LibraryBookServiceTest {
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static ListAppender<ILoggingEvent> captureLogs() {
+        Logger logger = (Logger) LoggerFactory.getLogger(LibraryBookService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private static void detach(ListAppender<ILoggingEvent> appender) {
+        Logger logger = (Logger) LoggerFactory.getLogger(LibraryBookService.class);
+        logger.detachAppender(appender);
+    }
+
+    private static List<String> logMessages(ListAppender<ILoggingEvent> appender) {
+        return appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
     }
 }

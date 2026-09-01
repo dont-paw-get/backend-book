@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +21,8 @@ import com.chc.dpgb.librarian.domain.LibrarianTypeInfo;
 
 @Service
 public class LibrarianService {
+
+    private static final Logger log = LoggerFactory.getLogger(LibrarianService.class);
 
     private final LibrarianRepository librarianRepository;
     private final LibrarianTypeInfoRepository librarianTypeInfoRepository;
@@ -46,11 +50,16 @@ public class LibrarianService {
         } catch (IllegalArgumentException e) {
             throw new InvalidLibrarianDataException(e.getMessage());
         }
+        Librarian saved;
         try {
-            return librarianRepository.save(librarian);
+            saved = librarianRepository.save(librarian);
         } catch (DataIntegrityViolationException e) {
+            // existsByMemberIdAndType 검사를 통과했는데도 unique 제약에 걸렸다 — 동시 획득 경합이다.
+            log.warn("사서 획득 경합으로 중복 판정 type={}", type);
             throw new LibrarianAlreadyOwnedException();
         }
+        log.info("사서 획득 librarianId={} type={}", saved.getLibrarianId(), type);
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -77,6 +86,10 @@ public class LibrarianService {
                 .ifPresent(current -> {
                     current.unmarkAsRepresentative();
                     librarianRepository.save(current);
+                    log.info(
+                            "대표 사서 교체 from={} to={}",
+                            current.getLibrarianId(), librarianId
+                    );
                 });
         target.markAsRepresentative();
         return librarianRepository.save(target);

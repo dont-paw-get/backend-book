@@ -43,6 +43,16 @@ dependencies {
 	// RestClient.Builder 자동 구성(RestClientAutoConfiguration)이 spring-boot-starter-webmvc에
 	// 딸려오지 않는다 — Book Discovery(알라딘 API 연동)의 AladinBookDiscoveryClient가 사용
 	implementation 'org.springframework.boot:spring-boot-starter-restclient'
+	// 관측(Observability) — Spring Boot 4.1의 공식 OpenTelemetry 스택.
+	// micrometer-tracing-bridge-otel + opentelemetry-sdk + opentelemetry-exporter-otlp를 함께 가져온다.
+	// 이 starter가 딸려오는 spring-boot-opentelemetry의 OpenTelemetryEnvironmentVariableEnvironmentPostProcessor가
+	// OTEL_SERVICE_NAME/OTEL_RESOURCE_ATTRIBUTES/OTEL_EXPORTER_OTLP_ENDPOINT/OTEL_EXPORTER_OTLP_PROTOCOL 같은
+	// OTel 표준 환경변수를 Spring 프로퍼티로 직접 매핑하므로, 별도 어댑터 코드나 -javaagent가 필요 없다.
+	implementation 'org.springframework.boot:spring-boot-starter-opentelemetry'
+	// Micrometer Observation은 Spring MVC/RestClient는 계측하지만 JDBC는 계측하지 않는다.
+	// PostgreSQL 쿼리 구간 span을 얻으려면 이 라이브러리가 필요하다 — 2.x가 Spring Boot 4 대응 라인이다
+	// (2.2.1의 pom이 spring-boot-*:4.0.5에 컴파일되어 있다. 1.x는 Boot 3용이라 쓰지 않는다).
+	implementation 'net.ttddyy.observation:datasource-micrometer-spring-boot:2.2.1'
 	// Swagger UI 정적 자산(순수 HTML/JS, Spring 애노테이션 스캔 없음) — docs/api/openapi.yaml을
 	// 그대로 렌더링하는 뷰어로만 쓴다. API 계약 소스는 계속 openapi.yaml 하나로 유지(CLAUDE.md 단일 소유권)
 	implementation 'org.webjars:swagger-ui:5.25.3'

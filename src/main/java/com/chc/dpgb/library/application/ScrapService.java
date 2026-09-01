@@ -1,6 +1,7 @@
 package com.chc.dpgb.library.application;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -72,12 +73,18 @@ public class ScrapService {
         scrapRepository.save(scrap);
     }
 
+    /**
+     * @return 함께 논리 삭제된 스크랩 수 — 호출자({@code LibraryBookService.deleteLibraryBook})가 캐스케이드 범위를
+     *         로그로 남기는 데 쓴다.
+     */
     @Transactional
-    void softDeleteAllByBookId(Long bookId, Instant deletedAt) {
-        for (Scrap scrap : scrapRepository.findAllByBookId(bookId)) {
+    int softDeleteAllByBookId(Long bookId, Instant deletedAt) {
+        List<Scrap> scraps = scrapRepository.findAllByBookId(bookId);
+        for (Scrap scrap : scraps) {
             scrap.softDelete(deletedAt);
             scrapRepository.save(scrap);
         }
+        return scraps.size();
     }
 
     private LibraryBook getOwnedBook(UUID memberId, Long bookId) {

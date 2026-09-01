@@ -14,6 +14,7 @@
 - Lombok (compile/annotation processor) — entity getter는 `@Getter`로 생성(예: `LibraryBook`), setter는 쓰지 않고 불변식이 있는 도메인 메서드로만 상태를 바꾼다
 - **soft delete 컨벤션(2026-08-25~)**: 논리 삭제를 쓰는 엔티티(`Shelf`/`LibraryBook`/`Scrap`/`Librarian`)는 `deletedAt`(Instant) 필드 + `softDelete(Instant)`/`isDeleted()` 도메인 메서드를 갖고, 클래스에 Hibernate `@SQLRestriction("deleted_at IS NULL")`(6.3+, 구 `@Where` 대체)을 붙인다 — 파생 쿼리·JPQL·`findById` 등 모든 조회에 자동 적용되어 서비스/리포지토리 코드가 조건을 반복하지 않는다. 하드 `delete()` 포트 메서드는 두지 않고, 서비스가 `entity.softDelete(Instant.now()); repository.save(entity);`로 통일한다.
 - **네이티브 Postgres enum 컬럼 매핑 컨벤션**: `genre_type`/`book_reading_status`/`librarian_type`처럼 DB가 네이티브 `ENUM` 타입인 컬럼은 Java enum 필드에 `@Enumerated(EnumType.STRING) + @JdbcTypeCode(SqlTypes.NAMED_ENUM)`(Hibernate 6.2+, `org.hibernate.annotations.JdbcTypeCode`/`org.hibernate.type.SqlTypes`)로 매핑한다. 일반 `@Enumerated(STRING)` 단독으로는 JDBC 드라이버가 값을 VARCHAR로 캐스팅하려다 실패한다.
+- 관측(Observability): `spring-boot-starter-opentelemetry`(Boot 4.1 공식 스택 — `micrometer-tracing-bridge-otel` + `opentelemetry-sdk`/`opentelemetry-exporter-otlp` 1.62.0) + `net.ttddyy.observation:datasource-micrometer-spring-boot:2.2.1`(JDBC 구간 span, Micrometer Observation이 커버하지 않는 유일한 구간. 2.x가 Boot 4 대응 라인). OpenTelemetry Java Agent(`-javaagent`)는 쓰지 않는다. 구조화 로그 포맷터는 `com.chc.dpgb.common.logging.JsonLogFormatter`(Boot 내장 `StructuredLogFormatter`/`JsonWriter` 구현, 외부 인코더 라이브러리 없음)
 - `org.webjars:swagger-ui`(5.25.3) — API 문서 뷰어. springdoc 같은 애노테이션 기반 스펙 생성기가 아니라 순수 정적 HTML/JS 자산만 제공 — `docs/api/openapi.yaml`이 계약의 유일한 소스라는 원칙을 지키기 위한 선택
 - 실제 버전은 `build.gradle`과 Gradle Wrapper가 최종 기준
 - **Spring Boot 4.1.0 패키지 이동 주의**: Jackson은 `com.fasterxml.jackson.databind`가 아니라 `tools.jackson.databind`(Jackson 3)를 쓴다. `@WebMvcTest`는 `org.springframework.boot.webmvc.test.autoconfigure`(`spring-boot-webmvc-test` 모듈)에 있다. 예전 Boot 버전 예제 코드의 import 경로를 그대로 쓰면 컴파일 에러가 난다.
@@ -27,6 +28,8 @@ src/main/java/com/chc/dpgb
 ├─ DpgbApplication.java
 ├─ common
 │  ├─ ErrorResponse.java              # {code, message} — API 전역 에러 응답 포맷
+│  ├─ logging
+│  │  └─ JsonLogFormatter.java        # prod 프로필의 stdout JSON 로그 포맷(필드명 계약의 단일 소유자)
 │  └─ exception
 │     ├─ DomainException.java         # abstract, code() 추상 메서드 — 계층 최상위
 │     ├─ BadRequestException.java     # abstract, 400
@@ -34,7 +37,7 @@ src/main/java/com/chc/dpgb
 │     ├─ NotFoundException.java       # abstract, 404
 │     ├─ ConflictException.java       # abstract, 409
 │     ├─ BadGatewayException.java     # abstract, 502
-│     ├─ GlobalExceptionHandler.java  # @RestControllerAdvice — 5개 abstract 타입 + 500 fallback(INTERNAL_ERROR)을 ErrorResponse로 매핑
+│     ├─ GlobalExceptionHandler.java  # @RestControllerAdvice — 5개 abstract 타입 + 500 fallback(INTERNAL_ERROR)을 ErrorResponse로 매핑. 일반 400/404는 로그를 남기지 않고, 운영상 의미가 있는 403/409는 INFO, 502는 WARN, 500은 ERROR(스택 포함)로 기록
 │     └─ (stable error code별 concrete 예외 18종 — InvalidSearchParameterException 등, openapi.yaml의 components.responses.* 기준. Librarian 관련 5종: LibrarianNotFoundException/LibrarianAccessDeniedException/LibrarianAlreadyOwnedException/InvalidLibrarianDataException/RepresentativeLibrarianNotSelectedException)
 ├─ health
 │  └─ HealthController.java           # GET /health — 인증 불필요(SecurityConfig permitAll), k8s readiness/liveness probe 대상
@@ -107,9 +110,9 @@ src/main/java/com/chc/dpgb
       └─ ClientIdValidator.java       # client_id == backend-auth의 Cognito Backend App Client
 
 src/main/resources
-├─ application.yaml          # 공통 설정 (JPA, Flyway 활성화, OAuth2 Resource Server issuer-uri/app-client-id, book-service.aladin.ttb-key=${ALADIN_API_TTB_KEY})
+├─ application.yaml          # 공통 설정 (JPA, Flyway 활성화, OAuth2 Resource Server issuer-uri/app-client-id, book-service.aladin.ttb-key=${ALADIN_API_TTB_KEY}, 관측 기본값: 트레이스 export 꺼짐·메트릭 export 꺼짐·sampling 1.0·JDBC 파라미터 값 미기록)
 ├─ application-local.yaml    # 로컬 프로필 — docker-compose Postgres 기본값
-├─ application-prod.yaml     # 운영 프로필 — 전부 env var, 기본값 없음
+├─ application-prod.yaml     # 운영 프로필(배포는 dev·prod 둘 다 이 프로필) — datasource는 전부 env var, JSON 구조화 로그 + 트레이스 export 켜짐
 ├─ static
 │  └─ docs
 │     └─ index.html          # Swagger UI 진입 페이지 — webjar(swagger-ui) 자산을 로드해 /openapi.yaml을 렌더링. /openapi.yaml 자체는 여기 없고 build.gradle의 processResources가 docs/api/openapi.yaml을 빌드 시점에 static/openapi.yaml로 복사해 채운다(수동 사본 없음)
@@ -126,6 +129,10 @@ src/main/resources
 
 src/test/java/com/chc/dpgb
 ├─ common/exception/GlobalExceptionHandlerTest.java
+├─ common/logging/JsonLogFormatterTest.java       # JSON 로그의 필드명 계약(7개 필수 필드)·MDC→trace_id/span_id·예외 렌더링
+├─ common/observation/RecordingObservationHandler.java  # 테스트 픽스처(테스트 아님) — custom span 검증용 기록 핸들러
+├─ discovery/BookDiscoverySpanTest.java           # book.discovery.search span 이름·outcome 3종·오류 기록
+├─ library/application/ShelfRebalanceSpanTest.java  # library.shelf.rebalance span 이름·book_count 속성
 ├─ library/domain/ShelfRankTest.java
 ├─ library/domain/LibraryBookTest.java
 ├─ library/domain/ScrapTest.java                 # 도메인 unit — sentence/scrapImageUrl/pageNumber 불변식, softDelete
@@ -179,6 +186,42 @@ Book Service는 database-per-service 원칙에 따라 자신만의 데이터베�
 - `RepositoryIntegrationTestSupport`(`@DataJpaTest`)가 CLIAR-31에서 처음 만들어졌다. `@DataJpaTest`의 큐레이션된 autoconfiguration 목록은 Flyway를 포함하지 않으므로 `@ImportAutoConfiguration(FlywayAutoConfiguration.class)`를 명시적으로 추가해야 `ddl-auto: validate`가 마이그레이션된 실제 스키마를 검증한다(`.harness/DECISIONS.md` 참조). 새 `*RepositoryImpl`을 추가할 때 이 기반 클래스를 상속한다. DB 레벨 `ON DELETE CASCADE` 같은 부수효과를 검증할 때는 Hibernate 1차 캐시가 낡은 상태를 들고 있을 수 있어 `TestEntityManager`(`org.springframework.boot.jpa.test.autoconfigure`)의 `clear()`로 캐시를 비운 뒤 재조회해야 한다(`ScrapRepositoryTest`, CLIAR-45에서 확인).
 - 통합 테스트: `DpgbApplicationTests`(`IntegrationTestSupport` 상속, 빈 smoke test), `LibraryBookRepositoryTest`/`ShelfRepositoryTest`/`ScrapRepositoryTest`/`LibrarianRepositoryTest`/`LibrarianTypeInfoRepositoryTest`(`RepositoryIntegrationTestSupport` 상속).
 
+## 관측 (로깅 · 분산 트레이싱)
+
+Kubernetes에서 `stdout JSON 로그 → Grafana Alloy → Loki`, `OTLP → OpenTelemetry Collector → Tempo` 두 경로로 관측한다. 애플리케이션의 책임은 "JSON 한 줄을 stdout에 쓴다"와 "OTLP로 span을 내보낸다"까지이고, 수집기·저장소는 인프라 저장소 소관이다.
+
+**로깅**
+
+- 로그는 파일이 아니라 **stdout으로만** 나간다(별도 appender 설정 없음 = Boot 기본 콘솔).
+- 배포 환경(prod 프로필)은 `logging.structured.format.console`에 `com.chc.dpgb.common.logging.JsonLogFormatter`를 지정해 JSON 한 줄로 출력한다. 로컬(local 프로필)은 Boot 기본 평문 로그 그대로다.
+- 필드: `timestamp`(ISO-8601 UTC) / `level` / `service` / `logger` / `message` / `thread` / `trace_id` / `span_id`, 예외가 있으면 `exception`·`stack_trace`, 그 외 허용된 MDC 키는 top-level로 통과. `memberId`/`sub`/`cognitoSub` 같은 지속적 사용자 식별자와 token/password/Authorization 계열 MDC 키는 출력하지 않는다. **필드명 계약의 소유자는 이 클래스**이고 Loki 쿼리가 이 이름에 의존한다. Boot 내장 `ecs`/`logstash` 포맷을 쓰지 않은 이유는 이 필드명 때문이다(`DECISIONS.md`).
+- `service` 값은 `OTEL_SERVICE_NAME` → `spring.application.name` 순으로 해석해 OTel resource의 `service.name`과 항상 같은 값이 되게 한다.
+- `trace_id`/`span_id`는 micrometer-tracing이 MDC에 넣는 `traceId`/`spanId`에서 온다. 트레이스 컨텍스트가 없는 로그(기동 로그 등)에서는 두 필드가 빠진다.
+- **로그를 남기는 지점(이벤트 중심, 컨트롤러 일괄 삽입 없음)**: `GlobalExceptionHandler`(일반 400/404는 미기록, 403/409 INFO, 502 WARN, 500 ERROR), `AladinBookDiscoveryClient`(외부 API 실패 WARN), `LibraryBookService`(책 등록·삭제 INFO / 등록 경합·랭크 재정렬 WARN), `ShelfService`(기본 책장 경합 WARN / 책장 삭제 INFO), `LibrarianService`(사서 획득·대표 교체 INFO). 비즈니스 로그는 `bookId`/`shelfId`/`librarianId`/결과 code 중심으로 남기고 `memberId`/Cognito `sub` 원문은 남기지 않는다.
+- **민감정보·사용자 식별자 금지**: password·access/refresh/ID token·`Authorization` 헤더·알라딘 TTBKey·AWS credential을 어떤 로그에도 남기지 않는다. `memberId`/Cognito `sub`는 credential은 아니지만 지속적 사용자 식별자이므로 기본적으로 stdout 로그와 span attribute에 남기지 않는다. 특히 `AladinBookDiscoveryClient`는 요청 URI에 TTBKey가 들어 있어 **URI 자체를 로그하지 않는다**. request/response body를 통째로 남기는 필터도 두지 않는다. JDBC span도 `jdbc.datasource-proxy.include-parameter-values: false`로 바인딩 파라미터 값을 기록하지 않는다.
+
+**트레이싱**
+
+- Spring Boot 4.1의 `spring-boot-opentelemetry`가 `OTEL_*` 표준 환경변수를 Spring 프로퍼티로 매핑한다(`OpenTelemetryEnvironmentVariableEnvironmentPostProcessor`). 그래서 OTLP 엔드포인트를 코드나 yaml에 하드코딩하지 않고 ConfigMap의 환경변수로만 준다. `OTEL_EXPORTER_OTLP_ENDPOINT`에는 `v1/traces` 경로를 Boot가 자동으로 덧붙이므로 베이스 URL(`http://host:4318`)만 준다.
+- **자동 계측 구간**: inbound HTTP/Spring MVC(`WebMvcObservationAutoConfiguration`), RestClient outbound(`RestClientObservationAutoConfiguration` — `AladinBookDiscoveryClient`가 주입받는 `RestClient.Builder`에 적용), JDBC/PostgreSQL(`DataSourceObservationAutoConfiguration`, datasource-micrometer). 넷 다 실행 중인 앱의 condition report로 확인했다.
+- **전파**: `management.tracing.propagation.produce` 기본값이 `[W3C]`라 다른 MSA 호출 시 `traceparent`가 자동으로 실린다(수신은 W3C/B3/B3_MULTI 모두 허용).
+- **직접 추가한 span은 2개뿐**이다. 자동 계측으로 설명되는 구간에는 수동 span을 넣지 않는다.
+  - `book.discovery.search`(`BookDiscoveryService`) — 속성 `book.discovery.outcome`(`ALREADY_REGISTERED`/`FOUND`/`NOT_FOUND`). 서재에 이미 있으면 알라딘을 호출하지 않아, 이 속성이 없으면 trace에 외부 호출 span이 있는 요청과 없는 요청이 이유 없이 섞여 보인다.
+  - `library.shelf.rebalance`(`LibraryBookService`) — 속성 `library.shelf.book_count`(값 종류가 많아 high cardinality). 드물게 한 요청이 책장 전체를 다시 저장하는 이유를 드러낸다.
+  - 두 span은 Micrometer `ObservationRegistry`로 만든다. 단위 테스트에서는 `ObservationRegistry.NOOP` 또는 `RecordingObservationHandler`(테스트 픽스처)를 주입한다.
+- **export 실패는 요청 실패로 이어지지 않는다.** `BatchSpanProcessor`가 비동기로 내보내므로, Collector를 내린 상태에서 요청을 계속 보내도 전부 200이고 로그에는 exporter의 `Failed to export spans`만 남는다(실측 확인).
+- 메트릭(`micrometer-registry-otlp`)은 starter가 함께 끌고 오지만 `management.otlp.metrics.export.enabled: false`로 꺼 뒀다 — 이번 범위는 로그·트레이스다.
+
+**환경별 스위치**
+
+| 상황 | 트레이스 export | 로그 포맷 |
+| --- | --- | --- |
+| 로컬(local 프로필) · 테스트(프로필 없음) | 꺼짐(`management.tracing.export.enabled: false`, 공통 기본값), sampling `1.0` | 사람이 읽는 평문 |
+| dev k8s(prod 프로필) | 켜짐 + `OTEL_EXPORTER_OTLP_*` 환경변수, `MANAGEMENT_TRACING_SAMPLING_PROBABILITY=1.0` | JSON |
+| prod k8s(prod 프로필) | 켜짐 + `OTEL_EXPORTER_OTLP_*` 환경변수, `MANAGEMENT_TRACING_SAMPLING_PROBABILITY=0.1` | JSON |
+
+export가 꺼져 있거나 sampling probability를 낮춰도 W3C trace context propagation은 계속 동작한다. Collector 없이도 로컬 로그를 trace_id로 묶어 볼 수 있다. **로컬에서 Collector 없이 기동해 WARN/ERROR 0건인 것을 실측 확인했다.**
+
 ## DB 문서
 
 - ERD(DBML): `docs/db/erd.dbml` — `db/migration`의 V1~V9 적용 후 최종 스키마 스냅샷. 마이그레이션 변경 시 수동으로 함께 갱신해야 한다(자동 동기화 없음). dbdiagram.io 등에 붙여넣으면 다이어그램으로 볼 수 있다.
@@ -197,7 +240,7 @@ Book Service는 database-per-service 원칙에 따라 자신만의 데이터베�
 - ECR: `594532711953.dkr.ecr.ap-northeast-2.amazonaws.com/dpyb-dev/dpyb-book`, EKS 클러스터: `dpyb-dev`
 - `.github/workflows/build-push-ecr.yml`: `develop` push(또는 수동 `workflow_dispatch`) 시 `Dockerfile`로 이미지를 빌드해 SHA 태그 + `develop-latest` 태그로 ECR에 푸시하고, `k8s/overlays/dev/kustomization.yaml`의 `newTag`를 SHA로 갱신하는 커밋을 같은 브랜치에 push한다(`paths-ignore: k8s/**`로 이 커밋 자체가 워크플로우를 다시 트리거하는 무한루프를 막는다). `main` push → prod도 활성화되어 있다: "Resolve target by branch" 스텝이 브랜치별로 대상을 나눠 `develop`은 `dpyb-dev/dpyb-book`(MUTABLE, `develop-latest` movable 태그 push) + dev overlay를, `main`은 `dpyb-prod/dpyb-book`(IMMUTABLE, 커밋 SHA 태그만 push — movable 태그 skip) + prod overlay를 갱신한다. 빌드는 `docker/setup-buildx-action` + `docker/build-push-action`으로 **멀티아키(`linux/amd64,linux/arm64`)** 이미지를 만든다 — buildx 멀티플랫폼 빌드는 로컬 이미지가 남지 않아 `docker tag`를 쓸 수 없으므로, push할 태그 전부를 "Resolve target by branch" 스텝이 `tags` 출력으로 계산해 한 번에 넘긴다. `provenance: false`로 attestation(unknown/unknown) 매니페스트가 붙지 않게 한다.
 - `k8s/`: Kustomize 기반. `base/`(Deployment/Service/Ingress/ConfigMap 공통 정의, namespace/replicas/image태그는 두지 않음) + `overlays/dev/`(namespace `dpyb-book-dev`, replicas 1, image `newTag: develop-latest`를 CI가 커밋 SHA로 갱신, `configmap-patch.yaml`로 dev Cognito 값 주입) + `overlays/prod/`(활성. namespace `dpyb-book`, replicas 2, image `newName: dpyb-prod/dpyb-book`·`newTag`를 CI가 커밋 SHA로 갱신, `configmap-patch.yaml`로 prod Cognito 값 주입). 상용은 book 전용 노드 분리를 위해 `nodepin-patch.yaml`로 `nodeSelector workload=book` + `toleration dedicated=book:NoSchedule`을 얹고, kustomization의 `patches`에서 이를 참조한다. `k8s/cluster/nodepool-book.yaml`은 이 상용 노드 분리를 뒷받침하는 Karpenter(EKS Auto Mode) NodePool로, `workload=book` label과 `dedicated=book:NoSchedule` taint를 가진 노드를 프로비저닝한다 — dev 클러스터에는 적용하지 않고 `dpyb-prod` 컨텍스트에서 `kubectl apply`로 1회 수동 적용한다(GitOps 대상 아님). 이 NodePool은 인스턴스 카테고리(`t`/`m`)만 제약하고 아키텍처는 제약하지 않으며, 실제로 프로비저닝된 `dpyb-prod` 노드는 전부 **arm64(Graviton)**다(`t4g.medium`/`c6g.large`). `dpyb-dev`는 amd64(`r5a`/`c5a`)와 arm64(`c6g`)가 섞여 있고 dev overlay에는 `nodeSelector`가 없어 파드가 어느 쪽에도 착지할 수 있다 — 그래서 컨테이너 이미지는 항상 멀티아키여야 한다. `k8s/secret.example.yaml`은 실제 값 없는 구조 예시일 뿐이고, 실제 Secret(`backend-book-secret`: `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`/`ALADIN_API_TTB_KEY`)은 Git에 커밋하지 않고 `kubectl create secret` 또는 SealedSecrets/External Secrets로 클러스터에 직접 생성한다.
-- ConfigMap(`backend-book-config`)에는 민감하지 않은 값만 둔다: `SPRING_PROFILES_ACTIVE=prod`(local 프로필과 달리 배포 환경은 항상 env var 기반 datasource를 쓰는 `application-prod.yaml`을 활성화 — dev/prod 네임스페이스 구분은 Spring 프로필이 아니라 overlay의 namespace/replicas/설정값으로 한다), `AUTH_ISSUER_URI`/`AUTH_APP_CLIENT_ID`(Cognito, 비밀은 아니지만 환경별로 다른 User Pool을 쓸 수 있어 overlay의 `configmap-patch.yaml`에서 채움 — dev·prod 모두 실값이 채워져 있고, 현재는 prod CD 파이프라인 검증을 위해 양쪽이 같은 dev User Pool(`ap-northeast-2_y1mKz50El`)을 공용한다. 상용 전용 User Pool 준비 시 prod overlay만 교체 — `.harness/BACKLOG.md`). `AUTH_APP_CLIENT_ID`는 **backend-auth 저장소의 `COGNITO_BACKEND_CLIENT_ID`와 반드시 같은 값**이어야 한다 — 프론트엔드는 Cognito와 직접 로그인하지 않고 backend-auth가 Backend App Client로 발급한 Access Token이 그대로 Book Service에 오므로, 값이 어긋나면 서명·issuer·`token_use`를 통과한 뒤 `client_id` 불일치로 전량 401이 된다(CLIAR-188).
+- ConfigMap(`backend-book-config`)에는 관측용 `OTEL_SERVICE_NAME=backend-book`·`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`(base)와 overlay별 `OTEL_EXPORTER_OTLP_ENDPOINT`·`OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name={dev|prod}`·`MANAGEMENT_TRACING_SAMPLING_PROBABILITY`(dev `1.0`, prod `0.1`)도 함께 둔다 — Collector 주소는 아직 관례 기본값(`http://opentelemetry-collector.observability.svc.cluster.local:4318`)이고 인프라 확정 시 교체 대상이다(`BACKLOG.md`). 그 밖에는 민감하지 않은 값만 둔다: `SPRING_PROFILES_ACTIVE=prod`(local 프로필과 달리 배포 환경은 항상 env var 기반 datasource를 쓰는 `application-prod.yaml`을 활성화 — dev/prod 네임스페이스 구분은 Spring 프로필이 아니라 overlay의 namespace/replicas/설정값으로 한다), `AUTH_ISSUER_URI`/`AUTH_APP_CLIENT_ID`(Cognito, 비밀은 아니지만 환경별로 다른 User Pool을 쓸 수 있어 overlay의 `configmap-patch.yaml`에서 채움 — dev·prod 모두 실값이 채워져 있고, 현재는 prod CD 파이프라인 검증을 위해 양쪽이 같은 dev User Pool(`ap-northeast-2_y1mKz50El`)을 공용한다. 상용 전용 User Pool 준비 시 prod overlay만 교체 — `.harness/BACKLOG.md`). `AUTH_APP_CLIENT_ID`는 **backend-auth 저장소의 `COGNITO_BACKEND_CLIENT_ID`와 반드시 같은 값**이어야 한다 — 프론트엔드는 Cognito와 직접 로그인하지 않고 backend-auth가 Backend App Client로 발급한 Access Token이 그대로 Book Service에 오므로, 값이 어긋나면 서명·issuer·`token_use`를 통과한 뒤 `client_id` 불일치로 전량 401이 된다(CLIAR-188).
 - Flyway 마이그레이션은 `spring.flyway.enabled: true`로 앱 기동 시 자동 실행되므로, `backend-record`(Python/Alembic)처럼 별도 `initContainer`로 마이그레이션을 분리하지 않는다.
 - readiness/liveness probe는 `GET /health`(`com.chc.dpgb.health.HealthController`, 인증 불필요)를 대상으로 한다. ALB Ingress의 `alb.ingress.kubernetes.io/healthcheck-path`도 동일 경로를 쓴다.
 - `argocd/application-dev.yaml`: `targetRevision: develop`, `path: k8s/overlays/dev`, `automated.prune+selfHeal` — dev는 완전 자동 배포(같은 클러스터 `kubernetes.default.svc`). `argocd/application-prod.yaml`은 `targetRevision: main`, `path: k8s/overlays/prod`로 활성화되어 있으며, dev와 달리 원격 `dpyb-prod` 클러스터(`destination.name: dpyb-prod`, 사전에 `argocd cluster add --name dpyb-prod` 등록 필요)로 배포한다.

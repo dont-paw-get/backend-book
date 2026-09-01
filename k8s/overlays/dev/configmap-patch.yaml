@@ -13,3 +13,14 @@ metadata:
 data:
   AUTH_ISSUER_URI: "https://cognito-idp.ap-northeast-2.amazonaws.com/ap-northeast-2_y1mKz50El"
   AUTH_APP_CLIENT_ID: "du6sabh7hm17goodv6sd2n9ag"
+
+  # OpenTelemetry Collector 주소. 프로토콜(http/protobuf)과 service.name 은 base ConfigMap 에 있다.
+  # TODO: 이 주소는 OTel Collector 차트의 관례 기본값(릴리스명 opentelemetry-collector,
+  #       네임스페이스 observability)이다. 인프라 저장소에서 실제 Service 이름/네임스페이스가
+  #       확정되면 그 값으로 교체할 것. (.harness/BACKLOG.md 참조)
+  #       엔드포인트에 닿지 못해도 span export 만 실패하고 비즈니스 요청은 정상 처리된다.
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://opentelemetry-collector.observability.svc.cluster.local:4318"
+  # Tempo/Loki 에서 dev/prod 를 가르는 표준 resource attribute
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment.name=dev"
+  # dev 는 요청별 trace 확인이 쉬워야 하므로 전량 샘플링한다. 운영 중 조정이 필요하면 이 env 만 바꾼다.
+  MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
