@@ -9,11 +9,16 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import com.chc.dpgb.common.exception.InvalidLibrarianDataException;
 import com.chc.dpgb.common.exception.LibrarianAccessDeniedException;
@@ -77,6 +82,47 @@ class LibrarianServiceTest {
         assertThat(result.getLevel()).isEqualTo(1);
         assertThat(result.getExperience()).isEqualTo(0L);
         assertThat(result.isRepresentative()).isFalse();
+    }
+
+    @Test
+    void 사서_획득_로그에는_memberId를_남기지_않는다() {
+        ListAppender<ILoggingEvent> logs = captureLogs();
+        try {
+            Librarian saved = librarian(7L, MEMBER_1, LibrarianType.RUSSIAN_BLUE, "나비");
+            when(librarianRepository.existsByMemberIdAndType(MEMBER_1, LibrarianType.RUSSIAN_BLUE)).thenReturn(false);
+            when(librarianRepository.save(any(Librarian.class))).thenReturn(saved);
+
+            librarianService.acquireLibrarian(MEMBER_1, LibrarianType.RUSSIAN_BLUE, "나비");
+
+            assertThat(logMessages(logs))
+                    .containsExactly("사서 획득 librarianId=7 type=RUSSIAN_BLUE")
+                    .allSatisfy(message -> assertThat(message)
+                            .doesNotContain("memberId")
+                            .doesNotContain(MEMBER_1.toString()));
+        } finally {
+            detach(logs);
+        }
+    }
+
+    @Test
+    void 사서_획득_경합_로그에는_memberId를_남기지_않는다() {
+        ListAppender<ILoggingEvent> logs = captureLogs();
+        try {
+            when(librarianRepository.existsByMemberIdAndType(MEMBER_1, LibrarianType.RUSSIAN_BLUE)).thenReturn(false);
+            when(librarianRepository.save(any(Librarian.class)))
+                    .thenThrow(new DataIntegrityViolationException("duplicate"));
+
+            assertThatThrownBy(() -> librarianService.acquireLibrarian(MEMBER_1, LibrarianType.RUSSIAN_BLUE, "나비"))
+                    .isInstanceOf(LibrarianAlreadyOwnedException.class);
+
+            assertThat(logMessages(logs))
+                    .containsExactly("사서 획득 경합으로 중복 판정 type=RUSSIAN_BLUE")
+                    .allSatisfy(message -> assertThat(message)
+                            .doesNotContain("memberId")
+                            .doesNotContain(MEMBER_1.toString()));
+        } finally {
+            detach(logs);
+        }
     }
 
     @Test
@@ -184,5 +230,22 @@ class LibrarianServiceTest {
         librarianService.deleteLibrarian(MEMBER_1, 1L);
 
         assertThat(owned.isDeleted()).isTrue();
+    }
+
+    private static ListAppender<ILoggingEvent> captureLogs() {
+        Logger logger = (Logger) LoggerFactory.getLogger(LibrarianService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private static void detach(ListAppender<ILoggingEvent> appender) {
+        Logger logger = (Logger) LoggerFactory.getLogger(LibrarianService.class);
+        logger.detachAppender(appender);
+    }
+
+    private static List<String> logMessages(ListAppender<ILoggingEvent> appender) {
+        return appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
     }
 }

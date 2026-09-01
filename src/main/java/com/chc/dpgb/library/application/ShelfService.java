@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +21,8 @@ import com.chc.dpgb.library.domain.ShelfRank;
 
 @Service
 public class ShelfService {
+
+    private static final Logger log = LoggerFactory.getLogger(ShelfService.class);
 
     private static final String DEFAULT_SHELF_NAME = "기본 책장";
 
@@ -39,6 +43,9 @@ public class ShelfService {
         try {
             return shelfRepository.save(Shelf.create(memberId, DEFAULT_SHELF_NAME, true));
         } catch (DataIntegrityViolationException e) {
+            // 부분 unique 인덱스가 동시 생성을 막았다 — 정상적인 경합 처리지만, 반복해서 찍히면
+            // 기본 책장 조회 경로에 문제가 있다는 신호이므로 남긴다.
+            log.warn("기본 책장 동시 생성 경합 — 기존 책장 재조회");
             return shelfRepository.findDefaultShelf(memberId).orElseThrow(() -> e);
         }
     }
@@ -80,15 +87,21 @@ public class ShelfService {
             throw new DefaultShelfCannotBeDeletedException();
         }
         Shelf defaultShelf = getOrCreateDefaultShelf(memberId);
+        int movedBooks = 0;
         for (LibraryBook book : libraryBookRepository.findShelfOrderedByRank(shelf.getShelfId())) {
             String newRank = libraryBookRepository.findLastRanked(defaultShelf.getShelfId())
                     .map(last -> ShelfRank.after(last.getShelfRank()))
                     .orElseGet(ShelfRank::initial);
             book.changeShelfId(defaultShelf.getShelfId(), newRank);
             libraryBookRepository.save(book);
+            movedBooks++;
         }
         shelf.softDelete(Instant.now());
         shelfRepository.save(shelf);
+        log.info(
+                "책장 삭제 shelfId={} movedBooks={} defaultShelfId={}",
+                shelfId, movedBooks, defaultShelf.getShelfId()
+        );
     }
 
     @Transactional(readOnly = true)

@@ -368,3 +368,42 @@ prod overlay도 사용자 지시로 함께 바꿨다. prod는 현재 dev User Po
 검증은 `./gradlew test` 209개 통과. `kubectl` current-context가 설정돼 있지 않고 DEV 자격증명도 없어 **실제 발급 토큰 E2E(backend-auth 로그인 → Book 보호 GET → 200)는 수행하지 못했다** — 사용자와 사전에 "없으면 단위 테스트까지만 하고 명시한다"로 합의한 대로다. `integrationTest`는 테스트 실행 정책상 기본 검증 범위 밖이라 돌리지 않았다(`SecurityConfig`를 `@Import`하는 `SecurityConfigTest`는 단위 테스트에 포함되어 통과했다). 배포 매니페스트 검증은 `kubectl kustomize`로 dev·prod 양쪽 렌더링 결과를 확인했다.
 
 **다음 세션 시작 시**: 커밋하지 않았다(사용자 요청 없음). 남은 미검증 구간은 실제 Cognito JWKS 연동과 실토큰 클레임 형태뿐이며 `BACKLOG.md`에 항목으로 있다. ArgoCD가 `develop`/`k8s/overlays/dev`를 추적하므로 **ConfigMap 변경은 머지 후에야 dev에 반영된다** — 머지 전 E2E는 구 설정 기준이라 401이 나오는 게 정상이다.
+
+## 2026-09-01: 로깅 + 분산 트레이싱 도입 (CLIAR-200)
+
+사용자가 Kubernetes에서 `stdout JSON 로그 → Grafana Alloy → Loki`, `OTLP → OpenTelemetry Collector → Tempo` 구조로 관측할 수 있게 해 달라고 했다. 출발점은 **로깅 코드가 한 줄도 없는 상태**였다 — `grep -r "Slf4j\|Logger" src/main` 0건, `logback-spring.xml` 없음, actuator 없음.
+
+**방식 선택이 이 작업의 핵심이었다.** 처음에는 JDBC까지 한 번에 잡아주는 OpenTelemetry Java Agent가 유력해 보였다. 그런데 Gradle로 실제 해석해 보니 Spring Boot 4.1.0에 `spring-boot-starter-opentelemetry`가 있었고, `spring-boot-opentelemetry-4.1.0.jar`의 `OpenTelemetryEnvironmentVariableEnvironmentPostProcessor` 클래스 상수를 뜯어보니 **`OTEL_SERVICE_NAME`/`OTEL_RESOURCE_ATTRIBUTES`/`OTEL_EXPORTER_OTLP_ENDPOINT`/`OTEL_EXPORTER_OTLP_PROTOCOL`을 그대로 읽고, 엔드포인트 뒤에 `v1/traces`까지 자동으로 붙인다**. 즉 요구사항의 "환경변수로 설정"이 에이전트 없이 충족된다. 에이전트를 얹으면 Micrometer Observation과 이중 계측이 되므로 쓰지 않기로 했다(사유는 `DECISIONS.md`).
+
+**JDBC만 예외**였다. Micrometer Observation은 JDBC를 계측하지 않아 `net.ttddyy.observation:datasource-micrometer-spring-boot`가 필요했는데, 이 저장소는 Boot 4 모듈 세분화에 Flyway·RestClient로 두 번 데인 적이 있어 **버전 라인을 먼저 확인**했다 — 1.x는 Boot 3용, 2.x가 Boot 4 라인이고 2.2.1의 pom이 `spring-boot-*:4.0.5`에 컴파일돼 있다. 이 확인이 없었으면 또 같은 함정에 빠졌을 것이다.
+
+**JSON 포맷은 직접 구현했다.** Boot 내장 `ecs`/`logstash` 포맷은 코드 0줄이지만 필드명이 `@timestamp`/`log.level`/`trace.id`다. 요구된 이름은 `timestamp`/`level`/`service`/`logger`/`message`/`trace_id`/`span_id`라서, 규격 이름을 쓰고 rename 규칙을 덧붙이느니 필드명을 소유하는 클래스(`com.chc.dpgb.common.logging.JsonLogFormatter`)를 하나 두는 편이 명확했다. 외부 인코더 없이 Boot의 `StructuredLogFormatter` + `JsonWriter`만 썼다. MDC 키가 `traceId`/`spanId`라는 것은 `micrometer-tracing-bridge-otel`의 `Slf4JEventListener` 상수로 확인한 뒤 포맷터에서 `trace_id`/`span_id`로 바꿔 내보낸다.
+
+**검증은 문서 신뢰가 아니라 실물로 했다.**
+- `./gradlew build` 통과 — 단위 221개(기존 209 + 신규 12), 통합 28개(Docker Desktop 기동, 실제 PostgreSQL).
+- 실행 중인 앱의 condition report로 `WebMvcObservationAutoConfiguration`/`RestClientObservationAutoConfiguration`/`DataSourceObservationAutoConfiguration`/`OtlpTracingAutoConfiguration`이 전부 **matched**, `OtlpMetricsExportAutoConfiguration`은 **negative**(의도대로 꺼짐)인 것을 확인.
+- 14318 포트에 **스텁 OTLP 수집기**(파이썬)를 띄워 실제 export를 받아봤다. 8배치 수신, payload 안에 `service.name`/`backend-book`/`deployment.environment.name`, `http get /health`·`http get /**`(서버 span), `jdbc.query[0]`·`jdbc.row-count`·실제 SQL(JDBC span)이 들어 있었다. `/v1/metrics`는 한 번도 오지 않았다.
+- 스텁 수집기를 **내린 뒤** 요청 10건 + α를 보내 전부 200인 것과, 로그에 남는 유일한 ERROR가 exporter의 `Failed to export spans`인 것을 확인했다(요구사항: export 실패가 요청 실패로 이어지면 안 된다).
+- local 프로필 + Collector 없음 상태로 기동해 WARN/ERROR **0건**을 확인했다.
+
+**작업 중 걸린 것 두 가지.** (1) 포트 8080에 사용자가 8월 25일부터 띄워둔 java 프로세스(PID 25260)가 있어 처음 기동이 조용히 실패했고, 헬스체크는 **그 남의 프로세스**가 200을 돌려주고 있었다 — 로그를 끝까지 읽지 않았으면 "성공"으로 오판할 뻔했다. 그 프로세스는 건드리지 않고 18080으로 옮겨 검증했다. (2) `docker compose`가 저장소의 `.env` 3번째 줄을 파싱하지 못해(`key cannot contain a space`) 실패한다 — 비밀값 파일이라 손대지 않고 빈 `--env-file`을 넘겨 우회했다. `.env`는 이 앱이 읽지 않으므로 기능에는 영향이 없지만, docker compose를 쓸 때마다 걸린다.
+
+**남은 것**: 실제 Collector 주소(현재 관례 기본값 + `TODO:` 주석), 메트릭/OTLP 로그 익스포트 미도입, 샘플링 1.0, 다른 MSA와의 end-to-end 단일 trace 실물 확인 — 전부 `BACKLOG.md`에 있다.
+
+**다음 세션 시작 시**: 커밋하지 않았다(사용자 요청 없음). 브랜치는 `CLIAR-200-book-server-logging-tracing`이다. ArgoCD가 `develop`/`k8s/overlays/dev`를 추적하므로 ConfigMap의 OTEL 변수는 머지 후에야 dev에 반영된다. 검증에 쓴 스텁 수집기와 임시 앱 프로세스는 모두 정리했고, 로컬 PostgreSQL 컨테이너(`dont_paw_get-postgres-1`)와 Docker Desktop은 이 세션에서 띄운 상태 그대로 두었다.
+
+## 2026-09-01 (계속): 관측 정책 미세 조정
+
+사용자가 기존 CLIAR-200 관측 구조를 다시 만들지 말고 sampling/4xx/memberId 정책만 최소 수정하라고 요청했다. `.harness/PLAN.md`에 후속 계획을 먼저 작성하고 사용자 확인 후 진행했다.
+
+Spring Boot 4.1의 `spring-boot-opentelemetry` jar에 `OpenTelemetryEnvironmentVariableEnvironmentPostProcessor`가 존재함을 로컬 의존성으로 재확인했다. OTLP endpoint/protocol/service/resource는 기존 `OTEL_*` 방식을 그대로 유지했고, sampling은 현재 앱이 이미 쓰는 Spring `management.tracing.sampling.probability` 축을 따라 k8s overlay env `MANAGEMENT_TRACING_SAMPLING_PROBABILITY`로 조정했다. dev 렌더링은 `1.0`, prod 렌더링은 `0.1`을 확인했다. 공통 `application.yaml`의 로컬/테스트 기본값은 `1.0`으로 유지했고, sampling을 낮춰도 W3C trace context propagation은 깨지지 않는다는 정책을 문서화했다.
+
+4xx logging은 `GlobalExceptionHandler`에서 일반 400/404는 계속 무로그, 운영상 의미 있는 403/409는 INFO(code만), 502는 WARN, 500은 ERROR로 정리했다. 요청 body/header/token/user identifier는 남기지 않는다. 테스트에서 400/404 무로그와 403/409 INFO 로그를 `ListAppender`로 고정했다.
+
+사용자 식별자 정책은 로그 호출과 span attribute를 전수 grep했다. `LibraryBookService`(책 등록 경합/등록/삭제), `ShelfService`(기본 책장 경합/책장 삭제), `LibrarianService`(사서 획득 경합/획득/대표 교체) 로그에서 원문 `memberId`를 제거하고 `bookId`/`shelfId`/`librarianId`/type/count/code만 남겼다. `JsonLogFormatter`에는 `memberId`/`sub`/`cognitoSub`와 token/password/Authorization 계열 MDC 키를 출력하지 않는 방어선을 추가했다. custom span 2개(`book.discovery.search`, `library.shelf.rebalance`)에는 사용자 식별자가 없음을 grep으로 확인했다.
+
+검증: `./gradlew test` 성공. 첫 `./gradlew clean build`는 코드 문제가 아니라 기존 untracked 임시 실호출 테스트 `src/integrationTest/java/com/chc/dpgb/TempAladinSpanVerification.java`가 `ALADIN_API_TTB_KEY`/로컬 OTLP stub 없이 실행되어 실패했다. 파일 주석대로 커밋 대상이 아닌 수동 검증용이라 `@Disabled("실제 Aladin API key와 로컬 OTLP stub collector가 필요한 수동 검증용")`를 추가했고, 재실행한 `./gradlew clean build`는 통합 테스트 포함 성공했다. `kubectl kustomize`는 sandbox 경로 접근 거부로 한 번 실패해 승인 경로로 재실행했고 dev/prod 렌더링 모두 성공했다.
+
+문서: `.harness/ARCHITECTURE.md`의 observability 정책을 갱신했고, `.harness/BACKLOG.md`에서 "dev/prod 모두 sampling 1.0" TODO를 제거했다. `.harness/PLAN.md`의 이번 후속 섹션은 완료되어 제거했고 `.harness/STATE.md`에 한 줄 스냅샷을 추가했다.
+
+다음 세션 시작 시: 여전히 브랜치는 `CLIAR-200-book-server-logging-tracing`이고 커밋은 하지 않았다(사용자 요청 없음). 이전 CLIAR-200 미커밋 변경과 이번 후속 변경이 같은 작업트리에 섞여 있으므로, 커밋 전에는 `git diff`로 포함 범위를 다시 확인할 것.

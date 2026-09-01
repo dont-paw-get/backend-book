@@ -3,3 +3,19 @@ spring:
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+
+# 배포 환경(dev/prod 네임스페이스 모두 이 프로필을 쓴다)의 관측 설정.
+logging:
+  structured:
+    format:
+      # 컨테이너 stdout을 Grafana Alloy가 수집해 Loki로 넘긴다 — 파일로 쓰지 않는다.
+      # 필드명 계약(timestamp/level/service/logger/message/trace_id/span_id)은 이 클래스가 소유한다.
+      console: com.chc.dpgb.common.logging.JsonLogFormatter
+
+management:
+  tracing:
+    export:
+      # OTLP 엔드포인트/프로토콜은 코드가 아니라 OTEL_EXPORTER_OTLP_* 환경변수로 주입한다
+      # (k8s/base/configmap.yaml + overlay의 configmap-patch.yaml).
+      # 엔드포인트에 닿지 못해도 BatchSpanProcessor가 비동기로 export하므로 비즈니스 요청은 실패하지 않는다.
+      enabled: true

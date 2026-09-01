@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import java.util.Optional;
 import java.util.UUID;
 
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,7 +35,9 @@ class BookDiscoveryServiceTest {
 
     @BeforeEach
     void setUp() {
-        bookDiscoveryService = new BookDiscoveryService(libraryBookRepository, bookDiscoveryClient);
+        bookDiscoveryService = new BookDiscoveryService(
+                libraryBookRepository, bookDiscoveryClient, ObservationRegistry.NOOP
+        );
     }
 
     @Test
