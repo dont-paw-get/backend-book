@@ -30,6 +30,10 @@ class AladinBookDiscoveryClient implements BookDiscoveryClient {
     private static final Logger log = LoggerFactory.getLogger(AladinBookDiscoveryClient.class);
 
     private static final String LOOKUP_URL = "https://www.aladin.co.kr/ttb/api/ItemLookUp.aspx";
+    private static final String SEARCH_URL = "https://www.aladin.co.kr/ttb/api/ItemSearch.aspx";
+
+    /** 알라딘 ItemSearch가 한 번에 돌려줄 수 있는 최대 결과 수. 제목·저자 검색의 교집합 확률을 높이기 위해 최대치를 쓴다. */
+    private static final int SEARCH_MAX_RESULTS = 50;
 
     /**
      * ItemSearch와 달리 ItemLookUp은 존재하지 않는 isbn 조회 시 빈 item 배열이 아니라 errorCode 8({"키에 해당하는 상품이 존재하지 않습니다."})을 반환한다(라이브 호출로 확인).
@@ -78,6 +82,62 @@ class AladinBookDiscoveryClient implements BookDiscoveryClient {
 
         List<AladinItem> items = response.item() != null ? response.item() : List.of();
         return items.stream().findFirst().map(AladinBookDiscoveryClient::toExternalBook);
+    }
+
+    @Override
+    public List<ExternalBook> searchByTitle(String title) {
+        return search(title, "Title");
+    }
+
+    @Override
+    public List<ExternalBook> searchByAuthor(String author) {
+        return search(author, "Author");
+    }
+
+    private List<ExternalBook> search(String query, String queryType) {
+        AladinSearchResponse response;
+        try {
+            response = restClient.get()
+                    .uri(buildSearchUri(query, queryType))
+                    .retrieve()
+                    .body(AladinSearchResponse.class);
+        } catch (RestClientException e) {
+            log.warn("알라딘 ItemSearch 호출 실패 queryType={}", queryType, e);
+            throw new AladinApiException();
+        }
+
+        if (response == null) {
+            log.warn("알라딘 ItemSearch 응답 본문이 비어 있음 queryType={}", queryType);
+            throw new AladinApiException();
+        }
+        if (response.errorCode() != null) {
+            log.warn(
+                    "알라딘 ItemSearch 오류 응답 queryType={} errorCode={} errorMessage={}",
+                    queryType, response.errorCode(), response.errorMessage()
+            );
+            throw new AladinApiException();
+        }
+
+        List<AladinItem> items = response.item() != null ? response.item() : List.of();
+        return items.stream()
+                .map(AladinBookDiscoveryClient::toExternalBook)
+                .toList();
+    }
+
+    private URI buildSearchUri(String query, String queryType) {
+        return UriComponentsBuilder.fromUriString(SEARCH_URL)
+                .queryParam("ttbkey", ttbKey)
+                .queryParam("Query", query)
+                .queryParam("QueryType", queryType)
+                .queryParam("SearchTarget", "Book")
+                .queryParam("MaxResults", SEARCH_MAX_RESULTS)
+                .queryParam("start", 1)
+                .queryParam("output", "js")
+                .queryParam("Version", "20131101")
+                .queryParam("OptResult", "itemPage")
+                .build()
+                .encode()
+                .toUri();
     }
 
     private URI buildLookupUri(String isbn) {

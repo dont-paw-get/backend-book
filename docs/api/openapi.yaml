@@ -2,7 +2,7 @@ openapi: 3.1.0
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 info:
   title: Virtual Shelf Book Service API
-  version: 0.9.0
+  version: 0.10.0
   description: |
     Virtual Shelf MSA의 Book Service 계약이다.
     알라딘 API 기반 외부 도서 검색, 개인 서재 관리, 독서 진도, 문장 스크랩, 동물 사서를 제공한다.
@@ -21,7 +21,7 @@ security:
   - bearerAuth: []
 tags:
   - name: Book Discovery
-    description: 인식된 제목/저자를 이용한 알라딘 외부 도서 검색
+    description: 알라딘 외부 도서 검색 — isbn 단건 조회, 제목·저자 교집합 검색
   - name: Library
     description: 로그인 사용자의 개인 서재 관리
   - name: Shelf
@@ -91,6 +91,61 @@ paths:
                 알라딘에도_없음:
                   value:
                     alreadyRegistered: false
+        "400":
+          $ref: "#/components/responses/InvalidSearchParameter"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "502":
+          $ref: "#/components/responses/AladinApiError"
+
+  /api/v1/books/search/by-title-author:
+    get:
+      tags: [Book Discovery]
+      operationId: searchBookByTitleAndAuthor
+      summary: 제목·저자 교집합 도서 검색
+      description: |
+        알라딘 `ItemSearch`를 제목으로 한 번, 저자로 한 번 호출해 두 결과의 교집합(isbn13 동일)을 구하고,
+        제목 검색 결과의 알라딘 반환 순서 기준 최상단 1권만 반환한다.
+        교집합이 비거나 한쪽 검색 결과가 없으면 `book`이 생략된다(사용자가 직접 입력하는 폴백 흐름으로 이어진다).
+        이 endpoint는 서재 등록 여부를 확인하지 않는다 — 순수 외부 검색이다. isbn을 이미 알고 있으면 `GET /api/v1/books/search`를 쓴다.
+      parameters:
+        - name: title
+          in: query
+          required: true
+          description: 검색할 도서 제목
+          schema:
+            type: string
+            minLength: 1
+          example: 어린 왕자
+        - name: author
+          in: query
+          required: true
+          description: 검색할 저자명
+          schema:
+            type: string
+            minLength: 1
+          example: 생텍쥐페리
+      responses:
+        "200":
+          description: 검색 성공(교집합이 없어도 200)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TitleAuthorBookSearchResponse"
+              examples:
+                교집합_최상단:
+                  value:
+                    book:
+                      title: 어린 왕자
+                      author: 앙투안 드 생텍쥐페리
+                      isbn: "9788932917245"
+                      publisher: 열린책들
+                      publishedDate: "2015-10-20"
+                      totalPages: 136
+                      coverUrl: https://image.aladin.co.kr/product/6853/49/coversum/8932917248_2.jpg
+                교집합_없음:
+                  value:
+                    book: null
         "400":
           $ref: "#/components/responses/InvalidSearchParameter"
         "401":
@@ -1135,6 +1190,14 @@ components:
           $ref: "#/components/schemas/ExternalBook"
           description: alreadyRegistered가 false이고 알라딘에서 해당 isbn을 찾았을 때만 존재. 알라딘에도 없으면 생략되며, 사용자가 직접 입력하는 폴백으로 이어진다
 
+    TitleAuthorBookSearchResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        book:
+          $ref: "#/components/schemas/ExternalBook"
+          description: 제목·저자 검색 결과의 교집합 중 최상단 도서. 교집합이 비면 생략된다.
+
     Genre:
       type: string
       enum:
@@ -1903,14 +1966,20 @@ components:
             message: 인증이 필요합니다.
 
     InvalidSearchParameter:
-      description: isbn이 없거나 형식(ISBN-10/13)에 맞지 않음
+      description: 검색 파라미터가 없거나 형식에 맞지 않음(`searchBookInfo`는 isbn, `searchBookByTitleAndAuthor`는 제목·저자)
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
-          example:
-            code: INVALID_SEARCH_PARAMETER
-            message: 유효한 isbn이 필요합니다.
+          examples:
+            isbn_검색:
+              value:
+                code: INVALID_SEARCH_PARAMETER
+                message: 유효한 isbn이 필요합니다.
+            제목저자_검색:
+              value:
+                code: INVALID_SEARCH_PARAMETER
+                message: 유효한 제목과 저자가 필요합니다.
 
     AladinApiError:
       description: 알라딘 API 호출 오류

@@ -75,17 +75,19 @@ src/main/java/com/chc/dpgb
 ├─ discovery                              # ADR-0012(isbn 기반 검색)로 재설계 — library.application 포트(LibraryBookRepository)를 단방향 참조(반대 방향 없음)
 │  ├─ ExternalBook.java                  # record — 포트가 반환하는 공용 표현(외부 API 벤더 비의존), 컨트롤러가 그대로 응답에 사용
 │  ├─ BookSearchResult.java              # record(libraryBook, book) — alreadyRegistered/found/notFound 팩토리. libraryBook이 있으면 이미 등록된 것
-│  ├─ BookDiscoveryClient.java           # 포트(순수 인터페이스) — Optional<ExternalBook> lookup(isbn)
-│  ├─ BookDiscoveryService.java          # isbn이 없거나 형식이 틀리면 400(INVALID_SEARCH_PARAMETER). LibraryBookRepository.findByMemberIdAndIsbn로 먼저 서재를 조회 — 있으면 알라딘 호출 없이 alreadyRegistered, 없으면 포트(lookup)에 위임. 생성자 주입 지점에 @Lazy(아래 aladin 패키지 참조)
+│  ├─ BookDiscoveryClient.java           # 포트(순수 인터페이스) — Optional<ExternalBook> lookup(isbn) + List<ExternalBook> searchByTitle/searchByAuthor(ADR-0013)
+│  ├─ BookDiscoveryService.java          # search(memberId, isbn): isbn 검증 후 LibraryBookRepository.findByMemberIdAndIsbn로 먼저 서재를 조회 — 있으면 알라딘 호출 없이 alreadyRegistered, 없으면 포트(lookup)에 위임. searchByTitleAndAuthor(title, author): 둘 중 하나라도 공백이면 400(INVALID_SEARCH_PARAMETER), 아니면 포트의 searchByTitle/searchByAuthor를 각각 호출해 isbn 교집합의 제목검색 순서상 최상단 1권을 Optional로 반환(memberId·서재 조회 불필요). 생성자 주입 지점에 @Lazy(아래 aladin 패키지 참조)
 │  ├─ aladin                             # 알라딘 API 연동 구현 세부사항 — 전부 package-private, discovery 패키지 밖에서는 BookDiscoveryClient 포트만 보인다
-│  │  ├─ AladinBookDiscoveryClient.java  # @Component + @Lazy, RestClient로 실제 ItemLookUp(isbn 단건 조회, isbn 길이로 ItemIdType을 ISBN/ISBN13 분기) 호출(라이브 호출로 확인). HTTP 200이어도 응답 바디의 errorCode가 있으면 AladinApiException(502) — 단, errorCode 8("키에 해당하는 상품이 존재하지 않습니다")만은 예외이며 "찾지 못함"(Optional.empty())으로 처리한다. ItemSearch(결과 없음=빈 item 배열)와 다른 지점이라 라이브 호출로 실제 확인했다
-│  │  ├─ AladinSearchResponse.java       # 응답 DTO(record) — 미매핑 필드가 오면 역직렬화 실패(엄격 검증, ignoreUnknown 미사용)
+│  │  ├─ AladinBookDiscoveryClient.java  # @Component + @Lazy, RestClient로 ItemLookUp(isbn 단건, isbn 길이로 ItemIdType을 ISBN/ISBN13 분기)과 ItemSearch(QueryType=Title/Author, MaxResults=50 — ADR-0013)를 호출(둘 다 라이브 호출로 확인). HTTP 200이어도 응답 바디의 errorCode가 있으면 AladinApiException(502) — 단, ItemLookUp의 errorCode 8("키에 해당하는 상품이 존재하지 않습니다")만은 예외이며 "찾지 못함"(Optional.empty())으로 처리한다. ItemSearch는 결과 없음을 빈 item 배열로 돌려주므로(errorCode 없음) 그대로 빈 리스트가 된다 — 라이브 호출로 확인
+│  │  ├─ AladinSearchResponse.java       # ItemLookUp·ItemSearch 공용 응답 DTO(record) — 미매핑 필드가 오면 역직렬화 실패(엄격 검증, ignoreUnknown 미사용)
 │  │  ├─ AladinItem.java                 # 응답 항목 DTO(record)
 │  │  ├─ AladinSubInfo.java              # itemPage(총 페이지) 등 optResult로 요청하는 부가 필드 — 실무에서 거의 항상 비어 있음(라이브 호출로 확인)
 │  │  └─ AuthorNameNormalizer.java       # "이름 (역할), 이름 (역할)" → "이름, 이름" 변환 순수 유틸
 │  └─ web
-│     ├─ BookDiscoveryController.java    # GET /api/v1/books/search?isbn=. @AuthenticationPrincipal Jwt + MemberIdResolver로 memberId 획득(다른 컨트롤러와 동일 패턴)
-│     └─ dto/BookSearchResponse.java     # { alreadyRegistered, libraryBook?(library.web.dto.LibraryBookDetailResponse 재사용), book?(ExternalBook) }
+│     ├─ BookDiscoveryController.java    # GET /api/v1/books/search?isbn= (memberId 필요), GET /api/v1/books/search/by-title-author?title=&author= (ADR-0013, memberId 불필요 — 인증만)
+│     └─ dto
+│        ├─ BookSearchResponse.java              # { alreadyRegistered, libraryBook?(library.web.dto.LibraryBookDetailResponse 재사용), book?(ExternalBook) }
+│        └─ TitleAuthorBookSearchResponse.java   # { book?(ExternalBook) } — 교집합 최상단 1권, 없으면 null
 ├─ librarian                             # library와 동일한 4계층(domain/application/infrastructure/web) 구조. 회원 소유 사서 인스턴스 모델로 전면 재작성(ADR-0011, ADR-0009 대체) — 마스터 카탈로그 조회만 하던 이전 구조에서 획득/개명/방출/대표지정까지 확장
 │  ├─ domain
 │  │  ├─ Librarian.java                  # aggregate root(JPA entity), @SQLRestriction("deleted_at IS NULL") — memberId(UUID)/type/name/level/experience/isRepresentative. acquire/rename/markAsRepresentative/unmarkAsRepresentative/softDelete 도메인 메서드
@@ -145,10 +147,10 @@ src/test/java/com/chc/dpgb
 ├─ library/web/LibraryBookControllerTest.java  # @WebMvcTest — SecurityConfigTest 패턴 재사용, 컨트롤러 자체 검증(필수 필드 누락 400 등) 위주
 ├─ library/web/ShelfControllerTest.java        # @WebMvcTest
 ├─ library/web/ScrapControllerTest.java        # @WebMvcTest
-├─ discovery/BookDiscoveryServiceTest.java      # Mockito
-├─ discovery/web/BookDiscoveryControllerTest.java  # @WebMvcTest
+├─ discovery/BookDiscoveryServiceTest.java      # Mockito — isbn 검색 3분기 + 제목·저자 교집합/빈결과/파라미터 400(ADR-0013)
+├─ discovery/web/BookDiscoveryControllerTest.java  # @WebMvcTest — /search, /search/by-title-author 각각 200/400/401/502
 ├─ discovery/aladin/AuthorNameNormalizerTest.java  # 순수 함수 단위 테스트
-├─ discovery/aladin/AladinBookDiscoveryClientTest.java  # MockRestServiceServer(네트워크 미사용) — fixture는 ItemLookUp 라이브 호출로 캡처한 실제 응답(CLIAR-161) + errorCode 8("찾지 못함") 응답
+├─ discovery/aladin/AladinBookDiscoveryClientTest.java  # MockRestServiceServer(네트워크 미사용) — fixture는 ItemLookUp/ItemSearch 라이브 호출로 캡처한 실제 응답(CLIAR-161, CLIAR-242) + errorCode 8("찾지 못함") 응답
 ├─ librarian/application/LibrarianServiceTest.java      # Mockito — 타입 카탈로그/획득(중복 409)/목록/개명/대표지정(기존 대표 해제 포함)/대표조회(미선택 404)/방출
 ├─ librarian/web/LibrarianControllerTest.java           # @WebMvcTest — 7개 endpoint 전수
 └─ security/...  # validator/MemberIdResolver(UUID 반환) 단위 테스트, SecurityConfigTest

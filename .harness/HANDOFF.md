@@ -425,3 +425,23 @@ Spring Boot 4.1의 `spring-boot-opentelemetry` jar에 `OpenTelemetryEnvironmentV
 커밋 여부는 아직 사용자에게 확인받지 않았다.
 
 다음 세션 시작 시: 이번 변경(`ObservabilityConfiguration` 신설 + 테스트)이 커밋됐는지 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다.
+
+## 2026-09-02 (계속): 알라딘 제목·저자 교집합 검색 API 추가 (CLIAR-242, ADR-0013)
+
+사용자가 "알라딘 제목으로 검색한 리스트 && 저자로 검색한 리스트의 교집합을 구하고, 그중 최상단 책 1권만 반환하는 API"를 요청했다. 이미 `CLIAR-242-알라딘-제목-저자-검색-API-추가` 브랜치가 체크아웃되어 있었다(working tree clean).
+
+`.harness/PLAN.md`에 설계 초안을 적고 `AskUserQuestion`으로 4가지를 확인받았다(전부 권장안): (1) 교집합 키 = isbn13 동일성 + 제목검색 순서상 첫 번째, (2) 결과 없음 = 200 + `book:null`(404 아님), (3) 서재 중복 확인(`alreadyRegistered`) 미포함 — 순수 외부 검색, (4) 경로 `GET /api/v1/books/search/by-title-author`. 사용자가 "구현해"로 확정.
+
+구현: `BookDiscoveryClient` 포트에 `searchByTitle`/`searchByAuthor`(각 `List<ExternalBook>`) 추가. `AladinBookDiscoveryClient`가 `ItemSearch.aspx`(`QueryType=Title`/`Author`, `MaxResults=50`, `SearchTarget=Book`) 호출을 재도입 — ADR-0003/CLIAR-34에서 한 번 제거했던 것으로, 기존 `AladinSearchResponse`/`AladinItem`/`toExternalBook`/`AuthorNameNormalizer`를 그대로 재사용했다. `BookDiscoveryService.searchByTitleAndAuthor(title, author)`가 파라미터 공백 검증(→ `InvalidSearchParameterException("유효한 제목과 저자가 필요합니다.")`) 후 두 번 호출해 저자 결과의 isbn 집합을 만들고 제목 결과를 순회하며 첫 교집합 원소를 `Optional`로 반환한다. custom span은 추가하지 않았다(RestClient outbound 자동 계측으로 충분, ARCHITECTURE의 "span 2개 제한" 원칙 유지). `BookDiscoveryController`에 `GET /search/by-title-author` 추가(memberId 불필요, 인증만) + `TitleAuthorBookSearchResponse` record.
+
+라이브 검증: `.env`의 `ALADIN_API_TTB_KEY`로 `ItemSearch`를 curl 호출해 확인 — 제목/저자 검색 정상 동작, `subInfo`는 비어 있음(기존 관찰과 일치), **결과 없음은 `errorCode` 없이 빈 `item` 배열**(ItemLookUp의 errorCode 8과 다른 지점, 설계대로). ("어린 왕자"+"생텍쥐페리" 조합의 교집합에 실제로 `9788932917245`가 나오는 것도 확인.)
+
+`AladinBookDiscoveryClientTest`에서 `queryParam("Query", "어린 왕자")` 단언이 실패했다 — `MockRestRequestMatchers.queryParam`은 URI를 디코딩하지 않고 인코딩된 값(`%EC...`)과 비교한다. 한글 `Query` 정확 일치 단언을 빼고 `QueryType`/`MaxResults`와 응답 매핑으로 검증하도록 조정했다.
+
+문서: `openapi.yaml` v0.9.0→v0.10.0(`searchBookByTitleAndAuthor` operation, `TitleAuthorBookSearchResponse` 스키마, `InvalidSearchParameter` 응답을 `examples` 2종으로 일반화, Book Discovery 태그 설명 갱신), `docs/api/decisions/0013-title-author-intersection-search.md` 신설, `docs/api/README.md`·`.harness/DOMAIN.md`·`ARCHITECTURE.md`·`STATE.md` 갱신, `PLAN.md`에서 A절 제거. `openapi.yaml`은 스크래치패드 파이썬 스크립트로 `$ref` 무결성·중복 operationId·미사용 컴포넌트 재검증(operationId 27개, 이슈 없음).
+
+검증: `./gradlew test` 전체 통과(discovery 3계층 신규 케이스 포함). DB를 안 건드려 통합 테스트는 범위 밖.
+
+커밋 여부는 아직 사용자에게 확인받지 않았다.
+
+다음 세션 시작 시: 이번 CLIAR-242 구현이 커밋됐는지 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다. `.env`는 계속 untracked 상태여야 한다.

@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.chc.dpgb.discovery.BookDiscoveryService;
 import com.chc.dpgb.discovery.web.dto.BookSearchResponse;
+import com.chc.dpgb.discovery.web.dto.TitleAuthorBookSearchResponse;
 import com.chc.dpgb.security.MemberIdResolver;
 
 @RestController
@@ -29,5 +30,12 @@ public class BookDiscoveryController {
     ) {
         UUID memberId = MemberIdResolver.resolve(jwt);
         return BookSearchResponse.from(bookDiscoveryService.search(memberId, isbn));
+    }
+
+    @GetMapping("/search/by-title-author")
+    public TitleAuthorBookSearchResponse searchBookByTitleAndAuthor(
+            @RequestParam(required = false) String title, @RequestParam(required = false) String author
+    ) {
+        return TitleAuthorBookSearchResponse.from(bookDiscoveryService.searchByTitleAndAuthor(title, author));
     }
 }

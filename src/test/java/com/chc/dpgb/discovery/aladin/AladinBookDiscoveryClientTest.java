@@ -8,6 +8,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +23,7 @@ import com.chc.dpgb.discovery.ExternalBook;
 class AladinBookDiscoveryClientTest {
 
     private static final String LOOKUP_URL = "https://www.aladin.co.kr/ttb/api/ItemLookUp.aspx";
+    private static final String SEARCH_URL = "https://www.aladin.co.kr/ttb/api/ItemSearch.aspx";
     private static final String NOT_FOUND_RESPONSE = "{\"errorCode\":8,\"errorMessage\":\"키에 해당하는 상품이 존재하지 않습니다.\"}";
 
     private MockRestServiceServer mockServer;
@@ -102,6 +104,53 @@ class AladinBookDiscoveryClientTest {
                         MediaType.APPLICATION_JSON));
 
         assertThatThrownBy(() -> client.lookup("9788931021295"))
+                .isInstanceOf(AladinApiException.class);
+    }
+
+    @Test
+    void 제목_검색은_QueryType_Title로_호출하고_결과를_ExternalBook_리스트로_변환한다() {
+        mockServer.expect(requestTo(startsWith(SEARCH_URL)))
+                .andExpect(queryParam("QueryType", "Title"))
+                .andExpect(queryParam("MaxResults", "50"))
+                .andRespond(withSuccess("""
+                        {"item":[
+                        {"title":"어린 왕자","author":"생텍쥐페리 (지은이)","isbn":"8932917248","isbn13":"9788932917245"},
+                        {"title":"어린 왕자 (필사책)","author":"생텍쥐페리 (원작)","isbn":"","isbn13":"9788999999999"}
+                        ]}
+                        """, MediaType.APPLICATION_JSON));
+
+        List<ExternalBook> result = client.searchByTitle("어린 왕자");
+
+        assertThat(result).extracting(ExternalBook::isbn)
+                .containsExactly("9788932917245", "9788999999999");
+        mockServer.verify();
+    }
+
+    @Test
+    void 저자_검색은_QueryType_Author로_호출한다() {
+        mockServer.expect(requestTo(startsWith(SEARCH_URL)))
+                .andExpect(queryParam("QueryType", "Author"))
+                .andRespond(withSuccess("{\"item\":[]}", MediaType.APPLICATION_JSON));
+
+        assertThat(client.searchByAuthor("생텍쥐페리")).isEmpty();
+        mockServer.verify();
+    }
+
+    @Test
+    void ItemSearch가_결과_없음이면_빈_리스트를_반환한다() {
+        mockServer.expect(requestTo(startsWith(SEARCH_URL)))
+                .andRespond(withSuccess("{\"totalResults\":0,\"item\":[]}", MediaType.APPLICATION_JSON));
+
+        assertThat(client.searchByTitle("존재하지 않는 제목")).isEmpty();
+    }
+
+    @Test
+    void ItemSearch가_errorCode를_반환하면_AladinApiException으로_변환한다() {
+        mockServer.expect(requestTo(startsWith(SEARCH_URL)))
+                .andRespond(withSuccess("{\"errorCode\":4,\"errorMessage\":\"API출력이 금지된 회원입니다.\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> client.searchByAuthor("생텍쥐페리"))
                 .isInstanceOf(AladinApiException.class);
     }
 
