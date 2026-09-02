@@ -407,3 +407,21 @@ Spring Boot 4.1의 `spring-boot-opentelemetry` jar에 `OpenTelemetryEnvironmentV
 문서: `.harness/ARCHITECTURE.md`의 observability 정책을 갱신했고, `.harness/BACKLOG.md`에서 "dev/prod 모두 sampling 1.0" TODO를 제거했다. `.harness/PLAN.md`의 이번 후속 섹션은 완료되어 제거했고 `.harness/STATE.md`에 한 줄 스냅샷을 추가했다.
 
 다음 세션 시작 시: 여전히 브랜치는 `CLIAR-200-book-server-logging-tracing`이고 커밋은 하지 않았다(사용자 요청 없음). 이전 CLIAR-200 미커밋 변경과 이번 후속 변경이 같은 작업트리에 섞여 있으므로, 커밋 전에는 `git diff`로 포함 범위를 다시 확인할 것.
+
+## 2026-09-02: trace 노이즈 제거 (CLIAR-234)
+
+사용자가 "Tempo에서 book 서버가 `GET /health`로 요청을 계속 보내는 것처럼 보인다"고 물었다. 원인은 k8s readiness(10초)/liveness(20초) 프로브 + ALB healthcheck가 전부 `GET /health`를 때리고, Spring MVC 자동 계측이 매 요청 span을 만드는데 dev sampling이 1.0이라 전량 export되는 것. 노이즈 제거의 부작용(정적 헬스 엔드포인트 관측 데이터만 잃음, 프로브 실패는 k8s Events/pod restart로 드러남)을 설명하고 사용자가 "노이즈 제거 + Swagger 정적 경로도 함께 제외"로 확정했다.
+
+이미 사용자가 `CLIAR-234-trace-노이즈-제거` 브랜치를 `develop`에서 파고 체크아웃해둔 상태였다.
+
+구현: `com.chc.dpgb.common.observability.ObservabilityConfiguration`(package-private `@Configuration`) 신설 — `ObservationPredicate` 빈이 `ServerRequestObservationContext`일 때만 `/health`·`/openapi.yaml`·`/docs`·`/webjars`(정확 일치 또는 `prefix + "/"` 하위)를 제외한다. RestClient outbound·JDBC·custom span은 건드리지 않는다. 제외 경로는 `SecurityConfig`의 `permitAll` 목록과 동일하게 맞췄다. `ObservabilityConfigurationTest`에 predicate 단위 테스트(파라미터라이즈드, Spring 컨텍스트 없음) 추가.
+
+작업 중 발견: `ObservabilityConfigurationTest.dev_overlay는_sampling을_전량으로_설정한다()`가 브랜치 base에서 이미 깨져 있었다 — CLIAR-200 배포 커밋 `15ca65c`가 dev configmap-patch.yaml의 `MANAGEMENT_TRACING_SAMPLING_PROBABILITY`를 `"1.0"`(쌍따옴표) → `'1.0'`(홑따옴표)로 바꿨는데 테스트 단언은 쌍따옴표 그대로였다(prod 단언은 이미 홑따옴표). 같은 테스트 파일을 건드리는 김에 단언을 실제 YAML(홑따옴표)에 맞춰 수정했다.
+
+검증: `./gradlew test` 전체 통과(신규 predicate 테스트 10건 + 기존 4건 포함).
+
+문서: `.harness/DECISIONS.md`(최상단), `.harness/ARCHITECTURE.md`(관측 절 + 소스/테스트 트리), `.harness/STATE.md`(한 줄) 반영. `.harness/PLAN.md`는 이번 작업이 한 번에 끝나 항목을 추가하지 않았다.
+
+커밋 여부는 아직 사용자에게 확인받지 않았다.
+
+다음 세션 시작 시: 이번 변경(`ObservabilityConfiguration` 신설 + 테스트)이 커밋됐는지 확인하고, 안 됐다면 커밋 의사를 먼저 확인한다.

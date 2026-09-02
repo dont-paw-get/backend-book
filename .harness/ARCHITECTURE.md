@@ -30,6 +30,8 @@ src/main/java/com/chc/dpgb
 │  ├─ ErrorResponse.java              # {code, message} — API 전역 에러 응답 포맷
 │  ├─ logging
 │  │  └─ JsonLogFormatter.java        # prod 프로필의 stdout JSON 로그 포맷(필드명 계약의 단일 소유자)
+│  ├─ observability
+│  │  └─ ObservabilityConfiguration.java  # ObservationPredicate 빈 — /health·/docs·/webjars·/openapi.yaml를 서버 span·메트릭에서 제외(CLIAR-234)
 │  └─ exception
 │     ├─ DomainException.java         # abstract, code() 추상 메서드 — 계층 최상위
 │     ├─ BadRequestException.java     # abstract, 400
@@ -130,6 +132,7 @@ src/main/resources
 src/test/java/com/chc/dpgb
 ├─ common/exception/GlobalExceptionHandlerTest.java
 ├─ common/logging/JsonLogFormatterTest.java       # JSON 로그의 필드명 계약(7개 필수 필드)·MDC→trace_id/span_id·예외 렌더링
+├─ common/observability/ObservabilityConfigurationTest.java  # sampling/OTLP 설정 YAML 계약 + ObservationPredicate 경로 제외 단위 테스트
 ├─ common/observation/RecordingObservationHandler.java  # 테스트 픽스처(테스트 아님) — custom span 검증용 기록 핸들러
 ├─ discovery/BookDiscoverySpanTest.java           # book.discovery.search span 이름·outcome 3종·오류 기록
 ├─ library/application/ShelfRebalanceSpanTest.java  # library.shelf.rebalance span 이름·book_count 속성
@@ -204,6 +207,7 @@ Kubernetes에서 `stdout JSON 로그 → Grafana Alloy → Loki`, `OTLP → Open
 
 - Spring Boot 4.1의 `spring-boot-opentelemetry`가 `OTEL_*` 표준 환경변수를 Spring 프로퍼티로 매핑한다(`OpenTelemetryEnvironmentVariableEnvironmentPostProcessor`). 그래서 OTLP 엔드포인트를 코드나 yaml에 하드코딩하지 않고 ConfigMap의 환경변수로만 준다. `OTEL_EXPORTER_OTLP_ENDPOINT`에는 `v1/traces` 경로를 Boot가 자동으로 덧붙이므로 베이스 URL(`http://host:4318`)만 준다.
 - **자동 계측 구간**: inbound HTTP/Spring MVC(`WebMvcObservationAutoConfiguration`), RestClient outbound(`RestClientObservationAutoConfiguration` — `AladinBookDiscoveryClient`가 주입받는 `RestClient.Builder`에 적용), JDBC/PostgreSQL(`DataSourceObservationAutoConfiguration`, datasource-micrometer). 넷 다 실행 중인 앱의 condition report로 확인했다.
+- **서버 관측 제외 경로**(CLIAR-234): `com.chc.dpgb.common.observability.ObservabilityConfiguration`의 `ObservationPredicate` 빈이 inbound HTTP 관측에서 `/health`·`/docs`·`/webjars`·`/openapi.yaml`(정확 일치 또는 바로 아래 하위 경로)를 제외한다 — k8s 프로브·ALB healthcheck·Swagger 자산 요청이 span·`http.server.requests` 메트릭을 만들지 않는다. `SecurityConfig`의 `permitAll` 목록과 같은 경로다. RestClient outbound·JDBC·커스텀 span은 필터하지 않는다.
 - **전파**: `management.tracing.propagation.produce` 기본값이 `[W3C]`라 다른 MSA 호출 시 `traceparent`가 자동으로 실린다(수신은 W3C/B3/B3_MULTI 모두 허용).
 - **직접 추가한 span은 2개뿐**이다. 자동 계측으로 설명되는 구간에는 수동 span을 넣지 않는다.
   - `book.discovery.search`(`BookDiscoveryService`) — 속성 `book.discovery.outcome`(`ALREADY_REGISTERED`/`FOUND`/`NOT_FOUND`). 서재에 이미 있으면 알라딘을 호출하지 않아, 이 속성이 없으면 trace에 외부 호출 span이 있는 요청과 없는 요청이 이유 없이 섞여 보인다.
