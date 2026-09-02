@@ -25,3 +25,4 @@
 - [`0010-reintroduce-genre-and-reading-status.md`](./decisions/0010-reintroduce-genre-and-reading-status.md): `genre`(ADR-0003 부분 반전)·`readingStatus`(ADR-0005 전체 반전) 재도입, `totalPages` 선택 필드 전환 근거
 - [`0011-librarian-ownership-model.md`](./decisions/0011-librarian-ownership-model.md): 사서를 마스터 카탈로그에서 회원 소유 인스턴스(레벨/경험치/대표 여부)로 재정의, 대표 사서 선택을 Book Service로 재통합(ADR-0009 대체) 근거
 - [`0012-isbn-based-book-search.md`](./decisions/0012-isbn-based-book-search.md): 도서 검색을 title/author에서 isbn 기준으로 전환, 검색 시점에 서재 등록 여부를 확인해 등록된 도서면 저장된 데이터를 즉시 반환하는 근거
+- [`0013-title-author-intersection-search.md`](./decisions/0013-title-author-intersection-search.md): 제목·저자를 각각 알라딘 검색해 교집합의 최상단 1권을 반환하는 신규 endpoint(`searchBookByTitleAndAuthor`) 추가 근거

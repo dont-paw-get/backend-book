@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -87,5 +88,57 @@ class BookDiscoveryServiceTest {
 
         assertThat(result.alreadyRegistered()).isFalse();
         assertThat(result.book()).isNull();
+    }
+
+    private static ExternalBook book(String isbn) {
+        return new ExternalBook("제목 " + isbn, "저자", isbn, "출판사", null, null, null);
+    }
+
+    @Test
+    void 제목이나_저자가_비어_있으면_400() {
+        assertThatThrownBy(() -> bookDiscoveryService.searchByTitleAndAuthor(null, "생텍쥐페리"))
+                .isInstanceOf(InvalidSearchParameterException.class);
+        assertThatThrownBy(() -> bookDiscoveryService.searchByTitleAndAuthor("어린 왕자", "  "))
+                .isInstanceOf(InvalidSearchParameterException.class);
+        verifyNoInteractions(bookDiscoveryClient);
+    }
+
+    @Test
+    void 제목_저자_교집합의_제목검색_순서상_최상단_1권을_반환한다() {
+        ExternalBook a = book("9788900000001");
+        ExternalBook b = book("9788900000002");
+        ExternalBook c = book("9788900000003");
+        // 제목 검색: [a, b, c] / 저자 검색: [c, b] → 교집합 {b, c}, 제목 순서상 b가 먼저
+        when(bookDiscoveryClient.searchByTitle("어린 왕자")).thenReturn(List.of(a, b, c));
+        when(bookDiscoveryClient.searchByAuthor("생텍쥐페리")).thenReturn(List.of(c, b));
+
+        Optional<ExternalBook> result = bookDiscoveryService.searchByTitleAndAuthor("어린 왕자", "생텍쥐페리");
+
+        assertThat(result).contains(b);
+    }
+
+    @Test
+    void 교집합이_비면_빈_결과를_반환한다() {
+        when(bookDiscoveryClient.searchByTitle("어린 왕자")).thenReturn(List.of(book("9788900000001")));
+        when(bookDiscoveryClient.searchByAuthor("생텍쥐페리")).thenReturn(List.of(book("9788900000009")));
+
+        assertThat(bookDiscoveryService.searchByTitleAndAuthor("어린 왕자", "생텍쥐페리")).isEmpty();
+    }
+
+    @Test
+    void 한쪽_검색_결과가_없으면_빈_결과를_반환한다() {
+        when(bookDiscoveryClient.searchByTitle("어린 왕자")).thenReturn(List.of(book("9788900000001")));
+        when(bookDiscoveryClient.searchByAuthor("생텍쥐페리")).thenReturn(List.of());
+
+        assertThat(bookDiscoveryService.searchByTitleAndAuthor("어린 왕자", "생텍쥐페리")).isEmpty();
+    }
+
+    @Test
+    void isbn이_없는_후보는_교집합_대상에서_제외한다() {
+        ExternalBook noIsbn = new ExternalBook("어린 왕자", "저자", null, null, null, null, null);
+        when(bookDiscoveryClient.searchByTitle("어린 왕자")).thenReturn(List.of(noIsbn));
+        when(bookDiscoveryClient.searchByAuthor("생텍쥐페리")).thenReturn(List.of(noIsbn));
+
+        assertThat(bookDiscoveryService.searchByTitleAndAuthor("어린 왕자", "생텍쥐페리")).isEmpty();
     }
 }

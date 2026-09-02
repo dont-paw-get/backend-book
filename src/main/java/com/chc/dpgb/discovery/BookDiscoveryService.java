@@ -1,6 +1,11 @@
 package com.chc.dpgb.discovery;
 
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
@@ -63,6 +68,28 @@ public class BookDiscoveryService {
                 .orElseGet(() -> bookDiscoveryClient.lookup(isbn)
                         .map(BookSearchResult::found)
                         .orElseGet(BookSearchResult::notFound));
+    }
+
+    /**
+     * 제목으로 한 번, 저자로 한 번 알라딘을 검색해 두 결과의 교집합(isbn 동일)을 구하고, 제목 검색 결과 순서 기준 최상단 1권을 반환한다.
+     * 교집합이 비거나 한쪽 검색 결과가 없으면 빈 Optional이다. 서재 등록 여부는 확인하지 않는다.
+     */
+    public Optional<ExternalBook> searchByTitleAndAuthor(String title, String author) {
+        if (isBlank(title) || isBlank(author)) {
+            throw new InvalidSearchParameterException("유효한 제목과 저자가 필요합니다.");
+        }
+        List<ExternalBook> byTitle = bookDiscoveryClient.searchByTitle(title);
+        Set<String> authorIsbns = bookDiscoveryClient.searchByAuthor(author).stream()
+                .map(ExternalBook::isbn)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        return byTitle.stream()
+                .filter(book -> book.isbn() != null && authorIsbns.contains(book.isbn()))
+                .findFirst();
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private static String outcomeOf(BookSearchResult result) {

@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -105,6 +106,52 @@ class BookDiscoveryControllerTest {
     @Test
     void 인증되지_않으면_401을_반환한다() throws Exception {
         mockMvc.perform(get("/api/v1/books/search").param("isbn", ISBN))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 제목_저자_교집합_최상단_책을_반환한다() throws Exception {
+        when(bookDiscoveryService.searchByTitleAndAuthor("어린 왕자", "생텍쥐페리"))
+                .thenReturn(Optional.of(new ExternalBook(
+                        "어린 왕자", "앙투안 드 생텍쥐페리", ISBN, "열린책들", null, 136, "https://example.com/cover.jpg"
+                )));
+
+        mockMvc.perform(get("/api/v1/books/search/by-title-author")
+                        .param("title", "어린 왕자").param("author", "생텍쥐페리")
+                        .with(jwt().jwt(j -> j.subject(MEMBER_1))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.book.title").value("어린 왕자"))
+                .andExpect(jsonPath("$.book.isbn").value(ISBN));
+    }
+
+    @Test
+    void 제목_저자_교집합이_없으면_book이_없다() throws Exception {
+        when(bookDiscoveryService.searchByTitleAndAuthor("어린 왕자", "생텍쥐페리"))
+                .thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/v1/books/search/by-title-author")
+                        .param("title", "어린 왕자").param("author", "생텍쥐페리")
+                        .with(jwt().jwt(j -> j.subject(MEMBER_1))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.book").doesNotExist());
+    }
+
+    @Test
+    void 제목_저자_검색에서_파라미터가_없으면_400() throws Exception {
+        when(bookDiscoveryService.searchByTitleAndAuthor(null, "생텍쥐페리"))
+                .thenThrow(new com.chc.dpgb.common.exception.InvalidSearchParameterException(
+                        "유효한 제목과 저자가 필요합니다."));
+
+        mockMvc.perform(get("/api/v1/books/search/by-title-author").param("author", "생텍쥐페리")
+                        .with(jwt().jwt(j -> j.subject(MEMBER_1))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_SEARCH_PARAMETER"));
+    }
+
+    @Test
+    void 제목_저자_검색도_인증되지_않으면_401을_반환한다() throws Exception {
+        mockMvc.perform(get("/api/v1/books/search/by-title-author")
+                        .param("title", "어린 왕자").param("author", "생텍쥐페리"))
                 .andExpect(status().isUnauthorized());
     }
 }
