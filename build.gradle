@@ -53,6 +53,12 @@ dependencies {
 	// PostgreSQL 쿼리 구간 span을 얻으려면 이 라이브러리가 필요하다 — 2.x가 Spring Boot 4 대응 라인이다
 	// (2.2.1의 pom이 spring-boot-*:4.0.5에 컴파일되어 있다. 1.x는 Boot 3용이라 쓰지 않는다).
 	implementation 'net.ttddyy.observation:datasource-micrometer-spring-boot:2.2.1'
+	// 관측(Observability) — Prometheus 메트릭. infra의 HTTP 5xx 에러율·p99 레이턴시 알림이
+	// Micrometer 형식 http_server_requests_seconds_* 메트릭을 ServiceMonitor로 스크레이핑해야 동작한다.
+	// actuator가 /actuator/prometheus 스크레이프 엔드포인트를 자동 구성하고, registry가 노출 포맷을 담당한다.
+	// 노출은 dev overlay에서만 켠다(k8s/overlays/dev) — 공통 application.yaml은 web 노출을 비워 둔다.
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'io.micrometer:micrometer-registry-prometheus'
 	// Swagger UI 정적 자산(순수 HTML/JS, Spring 애노테이션 스캔 없음) — docs/api/openapi.yaml을
 	// 그대로 렌더링하는 뷰어로만 쓴다. API 계약 소스는 계속 openapi.yaml 하나로 유지(CLAUDE.md 단일 소유권)
 	implementation 'org.webjars:swagger-ui:5.25.3'

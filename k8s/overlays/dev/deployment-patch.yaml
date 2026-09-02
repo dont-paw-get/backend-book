@@ -1,0 +1,16 @@
+# dev 전용: Prometheus 메트릭용 관리 포트(8081)를 컨테이너에 선언한다.
+# 애플리케이션은 MANAGEMENT_SERVER_PORT=8081(configmap-patch.yaml)로 이 포트에서 actuator를 서비스한다.
+# 메인 8080(http)은 그대로 두고, ALB Ingress는 8080만 노출하므로 /actuator/prometheus는
+# 클러스터 내부(ServiceMonitor)에서만 접근 가능하다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-book
+spec:
+  template:
+    spec:
+      containers:
+        - name: backend-book
+          ports:
+            - name: management
+              containerPort: 8081

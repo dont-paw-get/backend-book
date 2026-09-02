@@ -2,6 +2,14 @@
 
 완료된 항목은 여기 체크만 남기지 않고 `STATE.md`로 옮긴 뒤 이 문서에서 제거한다.
 
+## C. 관측 인프라 연동 — 배포 후 남은 확인 (구현 완료, `STATE.md` 참조)
+
+코드·매니페스트는 브랜치 `관측-인프라-연동`에 구현·검증 완료. 머지·배포 후 아래만 남았다.
+
+- [ ] 머지(→ `develop`) 후 ArgoCD가 dev에 반영되면 Prometheus `Targets`에서 `backend-book`(namespace `dpyb-book-dev`)가 UP인지 확인
+- [ ] Grafana에서 `http_server_requests_seconds_count{application="backend-book"}` / `_bucket` 조회 확인
+- [ ] infra 저장소에 회신값 전달 (`<SVC>=backend-book`, ServiceMonitor `backend-book`/`dpyb-book-dev`, Micrometer 기본 메트릭명, 스크레이핑 확인 결과) — 전달 채널(infra 이슈/PR 등)은 사용자 확인 대기
+
 ## B. dev DB 분리 — book 완료, auth·record 전환 대기
 
 dev Aurora에 서비스별 데이터베이스를 만들고 **데이터를 복사**했다(옮긴 것이 아니라 복사 —

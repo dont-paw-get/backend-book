@@ -24,3 +24,20 @@ data:
   OTEL_RESOURCE_ATTRIBUTES: 'deployment.environment.name=dev'
   # dev 는 요청별 trace 확인이 쉬워야 하므로 전량 샘플링한다. 운영 중 조정이 필요하면 이 env 만 바꾼다.
   MANAGEMENT_TRACING_SAMPLING_PROBABILITY: '1.0'
+
+  # ── Prometheus 메트릭 (dev 전용) ──────────────────────────────────────
+  # infra 의 HTTP 5xx 에러율·p99 레이턴시 알림이 이 서비스의 Micrometer 메트릭을 ServiceMonitor 로
+  # 스크레이핑해야 동작한다(servicemonitor.yaml). 공통 application.yaml 은 web 노출을 비워 두므로
+  # 여기서만 opt-in 한다 — prod overlay 에는 이 값이 없어 actuator 엔드포인트가 노출되지 않는다.
+  #
+  # 메트릭은 메인 8080(ALB 노출) 이 아니라 별도 관리 포트 8081 로 서비스한다. ALB Ingress 는 8080 만
+  # 노출하므로 /actuator/prometheus 가 인터넷에 열리지 않고, ServiceMonitor 가 클러스터 내부에서
+  # metrics 포트(8081)를 스크레이핑한다(deployment-patch.yaml / service-patch.yaml).
+  MANAGEMENT_SERVER_PORT: '8081'
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: 'health,prometheus'
+
+  # infra Collector 는 traces 파이프라인만 받는다. 메트릭은 위 ServiceMonitor(pull) 로, 로그는
+  # stdout→Alloy→Loki 로 나가므로 OTLP push 익스포터는 둘 다 꺼져 있어야 한다. Spring 은 이미
+  # 동일하게 동작하지만(management.otlp.metrics.export.enabled=false), Collector 팀과의 계약을 명시한다.
+  OTEL_METRICS_EXPORTER: 'none'
+  OTEL_LOGS_EXPORTER: 'none'
