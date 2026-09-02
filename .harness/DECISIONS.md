@@ -1,5 +1,11 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-09-02: 프로브·문서 경로를 서버 관측에서 제외 (CLIAR-234)
+
+- **`ObservationPredicate` 빈으로 `/health`·`/docs`·`/webjars`·`/openapi.yaml`를 서버 span·메트릭 대상에서 뺀다.** k8s readiness(10초)·liveness(20초) 프로브와 ALB healthcheck가 전부 `GET /health`를 때리는데, Spring MVC 자동 계측은 모든 inbound 요청에 span을 만든다. dev는 sampling 1.0이라 Tempo가 프로브 trace로만 채워져 실제 요청 trace를 찾기 어려웠다.
+- **sampling을 낮추는 대안은 버렸다.** `/health` 노이즈는 줄지만 실제 비즈니스 요청 trace도 같은 비율로 잃는다. OpenTelemetry rule-based sampler로 경로별 0%를 주는 방법도 있으나 설정이 복잡하고 "수동 계측 최소화" 원칙과 맞지 않는다. `ObservationPredicate`는 Boot가 `ObservationRegistry`에 자동 등록하는 표준 확장점이고, false 반환 시 Observation이 no-op이 되어 span·메트릭이 함께 빠진다.
+- **제외 경로는 `SecurityConfig`의 `permitAll` 목록과 동일하다.** 둘 다 "비즈니스 트래픽이 아닌 인프라/문서 경로"라는 같은 기준이라 목록이 갈라지지 않게 맞춘다. 잃는 것은 정적 헬스 엔드포인트의 관측 데이터뿐이며, 프로브 실패는 k8s Events·pod restart로, ALB 헬스는 타깃그룹 지표로 드러난다.
+
 ## 2026-09-01: 관측 스택을 Spring Boot 4.1 네이티브 OpenTelemetry로 구성 (CLIAR-200)
 
 - **OpenTelemetry Java Agent(`-javaagent`) 대신 Boot 네이티브 스택을 쓴다.** 처음에는 JDBC까지 한 번에 잡아주는 에이전트가 유력했지만, 실제로 Gradle로 해석해 보니 Spring Boot 4.1.0에 `spring-boot-starter-opentelemetry`가 있고 `spring-boot-opentelemetry`의 `OpenTelemetryEnvironmentVariableEnvironmentPostProcessor`가 **`OTEL_SERVICE_NAME`/`OTEL_RESOURCE_ATTRIBUTES`/`OTEL_EXPORTER_OTLP_ENDPOINT`/`OTEL_EXPORTER_OTLP_PROTOCOL`/`OTEL_TRACES_SAMPLER`/`OTEL_SDK_DISABLED` 등 OTel 표준 환경변수를 그대로 읽는다**(클래스 상수로 확인, `OTEL_EXPORTER_OTLP_ENDPOINT` 뒤에 `v1/traces`를 자동으로 붙이는 것까지). 즉 "환경변수로 설정한다"는 요구를 에이전트 없이 만족한다. 에이전트를 얹으면 Micrometer Observation과 **이중 계측**이 되고, 이미지에 25MB+ 다운로드 단계가 붙으며, 계측 동작이 Boot 자동구성 바깥에 숨는다. 얻는 것 대비 잃는 것이 컸다.
