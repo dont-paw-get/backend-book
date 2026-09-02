@@ -1,5 +1,13 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-09-02: Prometheus 메트릭 노출 — 별도 관리 포트, dev 한정 (관측-인프라-연동)
+
+- **infra 알림(HTTP 5xx 에러율·p99 레이턴시)이 이 서비스의 Micrometer 메트릭을 필요로 한다.** `spring-boot-starter-actuator` + `micrometer-registry-prometheus`를 추가하고 `/actuator/prometheus`를 노출한다. `percentiles-histogram.http.server.requests: true`로 `http_server_requests_seconds_bucket`을 생성해야 p99 알림이 동작하고, 공통 태그 `application=backend-book`으로 infra 쿼리가 이 서비스를 특정한다(`OTEL_SERVICE_NAME`·로그 `service` 필드와 같은 값 — RCA Agent가 메트릭↔로그↔트레이스를 상관분석하는 키).
+- **메인 포트(8080)가 아니라 별도 관리 포트(8081)로 서비스한다.** ALB Ingress가 `path: /`로 8080 전체를 인터넷에 노출하므로, 메인 포트에 `/actuator/prometheus`를 열면 메트릭이 외부에서 조회된다. `MANAGEMENT_SERVER_PORT=8081`로 분리하면 관리 포트는 별도 컨텍스트(자식)로 뜨고 앱의 `SecurityFilterChain`도 적용되지 않는다 — Prometheus 스크레이핑은 인증 없이 클러스터 내부에서만 가능해야 하므로 이 조합이 맞다. ALB는 8080만 노출한다.
+- **dev overlay에서만 켠다.** 공통 `application.yaml`은 `management.endpoints.web.exposure.include`를 빈 값으로 둬 기본값(`health`)조차 노출하지 않는다. dev overlay의 `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE`/`MANAGEMENT_SERVER_PORT` env로만 opt-in하고, 관리 포트·Service metrics 포트·ServiceMonitor는 dev overlay 전용 patch/resource로 추가한다. prod overlay·base는 불변(`kubectl kustomize` diff 0으로 확인). prod에 Collector/Prometheus가 준비되면 같은 패턴을 이식한다.
+- **메트릭은 ServiceMonitor(pull)로 받고 OTLP push는 계속 끈다.** infra Collector는 traces 파이프라인만 받으므로 `OTEL_METRICS_EXPORTER=none`·`OTEL_LOGS_EXPORTER=none`을 dev env에 명시했다(Spring은 이미 `management.otlp.metrics.export.enabled=false`로 동일 동작 — Collector 팀과의 계약을 문서화한 것). 메트릭 경로는 Prometheus 스크레이핑 하나로 유지한다.
+- **`/actuator`를 `ObservationPredicate` 제외 목록에 추가했다.** ServiceMonitor 30초 스크레이핑이 span·`http.server.requests` 메트릭을 만들지 않게 — `/health`(프로브) 노이즈 제거(CLIAR-234)와 같은 이유. 단 `/actuator`는 별도 관리 포트라 `SecurityConfig`의 `permitAll` 목록에는 넣지 않는다(그 목록은 메인 8080 기준).
+
 ## 2026-09-02: 프로브·문서 경로를 서버 관측에서 제외 (CLIAR-234)
 
 - **`ObservationPredicate` 빈으로 `/health`·`/docs`·`/webjars`·`/openapi.yaml`를 서버 span·메트릭 대상에서 뺀다.** k8s readiness(10초)·liveness(20초) 프로브와 ALB healthcheck가 전부 `GET /health`를 때리는데, Spring MVC 자동 계측은 모든 inbound 요청에 span을 만든다. dev는 sampling 1.0이라 Tempo가 프로브 trace로만 채워져 실제 요청 trace를 찾기 어려웠다.
