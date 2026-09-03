@@ -18,7 +18,7 @@ replicas:
 images:
   - name: backend-book
     newName: 594532711953.dkr.ecr.ap-northeast-2.amazonaws.com/dpyb-dev/dpyb-book
-    newTag: 85d9feb20efa1d8e251b0e8b64c99d4668ac8966
+    newTag: 526e6b6f377863b9b1afe5fd76e25771ffa1b3df
 
 # 개발 환경에서 달라지는 설정값만 덮어씀
 patches:
