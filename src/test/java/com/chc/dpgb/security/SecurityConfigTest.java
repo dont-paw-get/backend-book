@@ -1,5 +1,6 @@
 package com.chc.dpgb.security;
 
+import static org.hamcrest.Matchers.not;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -41,6 +42,22 @@ class SecurityConfigTest {
     void 문서_경로는_토큰_없이_접근_가능하다() throws Exception {
         mockMvc.perform(get("/docs/index.html"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void actuator_prometheus와_health는_토큰_없이_통과한다() throws Exception {
+        // 관리 포트(8081)도 이 SecurityFilterChain 목록을 타므로 permitAll이 없으면 401이 된다.
+        // @WebMvcTest에는 actuator 엔드포인트가 없어 핸들러 부재로 401이 아닌 다른 상태가 나온다 —
+        // 인증을 통과했다는 것만 검증한다(실제 8081에서는 200).
+        mockMvc.perform(get("/actuator/prometheus")).andExpect(status().is(not(401)));
+        mockMvc.perform(get("/actuator/health")).andExpect(status().is(not(401)));
+    }
+
+    @Test
+    void 그_외_actuator_경로는_여전히_인증을_요구한다() throws Exception {
+        mockMvc.perform(get("/actuator/env"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
     @Test

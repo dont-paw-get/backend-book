@@ -106,7 +106,7 @@ src/main/java/com/chc/dpgb
 │     └─ dto                             # AcquireLibrarianRequest/Response, LibrarianListResponse/LibrarianSummary, RenameLibrarianRequest/Response, RepresentativeLibrarianResponse, LibrarianTypeListResponse/LibrarianTypeSummary — openapi 스키마 1:1
 │  ※ LibrarianLevel(레벨별 필요 경험치 정책)은 JPA 엔티티로 만들지 않았다 — 레벨업 로직이 범위 밖이라 앱 코드가 조회하지 않는다. DB 테이블/FK만 V9 마이그레이션으로 존재(YAGNI, 필요해지면 추가)
 └─ security
-   ├─ SecurityConfig.java             # JwtDecoder/SecurityFilterChain/AuthenticationEntryPoint 빈
+   ├─ SecurityConfig.java             # JwtDecoder/SecurityFilterChain/AuthenticationEntryPoint 빈 + @Order(0) actuatorSecurityFilterChain(/actuator/prometheus·/actuator/health 무인증 — 관리 포트 8081도 같은 필터 체인을 타므로, CLIAR-255)
    ├─ JwtAuthenticationEntryPoint.java
    ├─ MemberIdResolver.java           # Jwt의 sub 클레임 → UUID.fromString()으로 memberId 추출하는 단일 지점(2026-08-25~, 이전엔 String 그대로 반환) — sub이 유효한 UUID 형식이 아니면 IllegalArgumentException
    └─ jwt
@@ -211,7 +211,7 @@ Kubernetes에서 `stdout JSON 로그 → Grafana Alloy → Loki`, `OTLP → Open
 
 - Spring Boot 4.1의 `spring-boot-opentelemetry`가 `OTEL_*` 표준 환경변수를 Spring 프로퍼티로 매핑한다(`OpenTelemetryEnvironmentVariableEnvironmentPostProcessor`). 그래서 OTLP 엔드포인트를 코드나 yaml에 하드코딩하지 않고 ConfigMap의 환경변수로만 준다. `OTEL_EXPORTER_OTLP_ENDPOINT`에는 `v1/traces` 경로를 Boot가 자동으로 덧붙이므로 베이스 URL(`http://host:4318`)만 준다.
 - **자동 계측 구간**: inbound HTTP/Spring MVC(`WebMvcObservationAutoConfiguration`), RestClient outbound(`RestClientObservationAutoConfiguration` — `AladinBookDiscoveryClient`가 주입받는 `RestClient.Builder`에 적용), JDBC/PostgreSQL(`DataSourceObservationAutoConfiguration`, datasource-micrometer). 넷 다 실행 중인 앱의 condition report로 확인했다.
-- **서버 관측 제외 경로**(CLIAR-234 + 관측-인프라-연동): `com.chc.dpgb.common.observability.ObservabilityConfiguration`의 `ObservationPredicate` 빈이 inbound HTTP 관측에서 `/health`·`/docs`·`/webjars`·`/openapi.yaml`·`/actuator`(정확 일치 또는 바로 아래 하위 경로)를 제외한다 — k8s 프로브·ALB healthcheck·Swagger 자산·Prometheus 스크레이핑 요청이 span·`http.server.requests` 메트릭을 만들지 않는다. `/actuator` 외 4개는 `SecurityConfig`의 `permitAll` 목록과 같다(`/actuator`는 별도 관리 포트라 그 목록에 없다). RestClient outbound·JDBC·커스텀 span은 필터하지 않는다.
+- **서버 관측 제외 경로**(CLIAR-234 + 관측-인프라-연동): `com.chc.dpgb.common.observability.ObservabilityConfiguration`의 `ObservationPredicate` 빈이 inbound HTTP 관측에서 `/health`·`/docs`·`/webjars`·`/openapi.yaml`·`/actuator`(정확 일치 또는 바로 아래 하위 경로)를 제외한다 — k8s 프로브·ALB healthcheck·Swagger 자산·Prometheus 스크레이핑 요청이 span·`http.server.requests` 메트릭을 만들지 않는다. `/actuator` 외 4개는 `SecurityConfig` 메인 체인의 `permitAll` 목록과 같다. `/actuator`는 메인 체인이 아니라 전용 `actuatorSecurityFilterChain`(`/actuator/prometheus`·`/actuator/health` permitAll)이 담당한다 — 관측 제외는 접두사 `/actuator` 전체이고 무인증 허용은 그 두 경로만이라 범위가 다르다. RestClient outbound·JDBC·커스텀 span은 필터하지 않는다.
 - **전파**: `management.tracing.propagation.produce` 기본값이 `[W3C]`라 다른 MSA 호출 시 `traceparent`가 자동으로 실린다(수신은 W3C/B3/B3_MULTI 모두 허용).
 - **직접 추가한 span은 2개뿐**이다. 자동 계측으로 설명되는 구간에는 수동 span을 넣지 않는다.
   - `book.discovery.search`(`BookDiscoveryService`) — 속성 `book.discovery.outcome`(`ALREADY_REGISTERED`/`FOUND`/`NOT_FOUND`). 서재에 이미 있으면 알라딘을 호출하지 않아, 이 속성이 없으면 trace에 외부 호출 span이 있는 요청과 없는 요청이 이유 없이 섞여 보인다.
@@ -224,7 +224,7 @@ Kubernetes에서 `stdout JSON 로그 → Grafana Alloy → Loki`, `OTLP → Open
 
 - infra Prometheus가 `/actuator/prometheus`(Micrometer 포맷, `spring-boot-starter-actuator` + `micrometer-registry-prometheus`)를 스크레이핑한다. infra의 HTTP 5xx 에러율·p99 레이턴시 알림이 `http_server_requests_seconds_count`/`_bucket`에 의존한다.
 - **공통 `application.yaml`**: `management.endpoints.web.exposure.include`를 빈 값으로 둬 어떤 actuator 웹 엔드포인트도 노출하지 않는다(기본값 `health`조차). `management.metrics.tags.application: backend-book`(모든 메트릭 공통 라벨 — infra 쿼리 키, `OTEL_SERVICE_NAME`·로그 `service`와 동일값), `management.metrics.distribution.percentiles-histogram.http.server.requests: true`(p99 알림용 `_bucket` 생성).
-- **dev overlay만** 실제로 노출한다: `MANAGEMENT_SERVER_PORT=8081`(별도 관리 포트 — 메인 8080은 ALB로 인터넷 노출되므로 분리), `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,prometheus`. 관리 포트는 앱 `SecurityFilterChain`이 적용되지 않는 자식 컨텍스트라 인증 없이 스크레이핑되고, ALB Ingress는 8080만 노출해 외부에서 닿지 않는다. prod overlay·base 매니페스트는 불변(`kubectl kustomize` diff 0).
+- **dev overlay만** 실제로 노출한다: `MANAGEMENT_SERVER_PORT=8081`(별도 관리 포트 — 메인 8080은 ALB로 인터넷 노출되므로 분리), `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,prometheus`. **관리 포트는 자식 컨텍스트로 뜨지만 Spring Boot의 `ServletManagementChildContextConfiguration`이 부모의 `springSecurityFilterChain`을 그 컨텍스트에 재등록하므로, 8081도 메인 포트와 같은 `SecurityConfig`의 필터 체인을 탄다(CLIAR-255에서 8081 스크레이핑이 401로 확인됨).** 그래서 `SecurityConfig`에 `@Order(0)` `actuatorSecurityFilterChain`(`securityMatcher("/actuator/prometheus", "/actuator/health")` + `permitAll`)을 두어 이 두 경로만 무인증 허용한다 — `EndpointRequest.toAnyEndpoint()`는 관리 포트 분리 시 부모 컨텍스트에서 매칭되지 않아 쓰지 않는다. 나머지 `/actuator/*`는 메인 체인으로 떨어져 401이 유지되고, ALB Ingress는 8080만 노출해 외부에서 닿지 않는다. prod overlay·base 매니페스트는 불변(`kubectl kustomize` diff 0).
 - prod는 이 저장소 범위 밖이다 — Collector/Prometheus가 prod 클러스터에 준비되면 dev와 같은 패턴(관리 포트 env + Service metrics 포트 patch + ServiceMonitor)을 prod overlay에 이식한다(`BACKLOG.md`).
 
 **환경별 스위치**

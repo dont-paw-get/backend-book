@@ -1,5 +1,13 @@
 # DECISIONS (결정 이력, 최신이 위)
 
+## 2026-09-03: 관리 포트 actuator 스크레이핑 401 — 전용 permitAll 체인으로 해결 (CLIAR-255)
+
+- **아래 2026-09-02 항목의 전제("`MANAGEMENT_SERVER_PORT`로 분리하면 관리 포트는 자식 컨텍스트로 뜨고 앱의 `SecurityFilterChain`도 적용되지 않는다")가 틀렸다.** 클러스터 내부에서 `http://backend-book.dpyb-book-dev.svc:8081/actuator/prometheus`가 **HTTP 401**을 반환해 ServiceMonitor 스크레이핑이 전부 거부되고 있었다. 원인: Spring Boot 4.1의 `ServletManagementChildContextConfiguration.ServletManagementContextSecurityConfiguration`이 `@EnableWebSecurity`로 만들어진 부모의 `springSecurityFilterChain`(FilterChainProxy)과 `securityFilterChainRegistration`을 자식 관리 컨텍스트에 그대로 재등록한다(소스 확인). 즉 8081도 메인 8080과 **동일한** `SecurityFilterChain` 목록을 타고, 그 단일 체인이 `anyRequest().authenticated()`이며 permitAll 목록에 `/actuator/*`가 없다. `ManagementWebSecurityAutoConfiguration`은 `@ConditionalOnDefaultWebSecurity`라 커스텀 체인이 있으면 back-off하므로 actuator 기본 permitAll도 안 걸린다.
+- **`EndpointRequest.toAnyEndpoint()`를 쓰지 않는다.** 이 매처는 관리 포트가 분리되면 부모 컨텍스트(체인이 만들어지는 곳)에서 `PathMappedEndpoints`를 찾지 못해 매칭되지 않는다 — 관리 포트 분리 시 actuator 보안의 대표적 함정. 대신 경로 기반 전용 `@Order(0)` `SecurityFilterChain`(`securityMatcher("/actuator/prometheus", "/actuator/health")` + `anyRequest().permitAll()` + csrf disable)을 `SecurityConfig`에 추가했다.
+- **여는 경로는 `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,prometheus`와 정확히 같은 둘로 한정한다.** `/actuator/**` 전체가 아니라 실제 노출 경로만 연다. 나머지 `/actuator/*`는 이 체인에 매칭되지 않아 메인 체인으로 떨어져 401이 유지되므로, 같은 포트에서 실수로 다른 엔드포인트가 노출돼도 무인증이 되지 않는다. 이 체인은 `oauth2ResourceServer`/`authenticationEntryPoint`를 걸지 않아 `JwtDecoder`도 참조하지 않는다.
+- **메인 8080에는 실질 영향이 없다.** 관리 포트를 분리하면 actuator 핸들러는 자식 컨텍스트에만 매핑되므로 8080에서 이 두 경로는 permitAll이어도 404다. prod overlay는 관리 포트·노출 자체가 없어 무영향(`kubectl kustomize` diff 0).
+- **검증은 `SecurityConfigTest`(`@WebMvcTest`)까지만 코드로 고정했다** — 토큰 없이 두 경로가 401이 아님, `/actuator/env`는 여전히 401. `@WebMvcTest`에는 actuator·별도 관리 포트가 없어 8081의 실제 200/스크레이핑 확인은 머지·dev 배포 후 클러스터에서 사용자가 수행한다(`PLAN.md` C절).
+
 ## 2026-09-02: Prometheus 메트릭 노출 — 별도 관리 포트, dev 한정 (관측-인프라-연동)
 
 - **infra 알림(HTTP 5xx 에러율·p99 레이턴시)이 이 서비스의 Micrometer 메트릭을 필요로 한다.** `spring-boot-starter-actuator` + `micrometer-registry-prometheus`를 추가하고 `/actuator/prometheus`를 노출한다. `percentiles-histogram.http.server.requests: true`로 `http_server_requests_seconds_bucket`을 생성해야 p99 알림이 동작하고, 공통 태그 `application=backend-book`으로 infra 쿼리가 이 서비스를 특정한다(`OTEL_SERVICE_NAME`·로그 `service` 필드와 같은 값 — RCA Agent가 메트릭↔로그↔트레이스를 상관분석하는 키).

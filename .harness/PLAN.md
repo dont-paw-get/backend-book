@@ -4,9 +4,10 @@
 
 ## C. 관측 인프라 연동 — 배포 후 남은 확인 (구현 완료, `STATE.md` 참조)
 
-코드·매니페스트는 브랜치 `관측-인프라-연동`에 구현·검증 완료. 머지·배포 후 아래만 남았다.
+코드·매니페스트는 브랜치 `관측-인프라-연동`에 구현·검증 완료. **8081 스크레이핑 401 수정(CLIAR-255)까지
+`develop`에 머지되어야** 아래가 의미 있다.
 
-- [ ] 머지(→ `develop`) 후 ArgoCD가 dev에 반영되면 Prometheus `Targets`에서 `backend-book`(namespace `dpyb-book-dev`)가 UP인지 확인
+- [ ] 머지(→ `develop`) 후 ArgoCD가 dev에 반영되면 Prometheus `Targets`에서 `backend-book`(namespace `dpyb-book-dev`)가 UP인지 확인 (CLIAR-255 머지 전에는 8081이 401이라 DOWN이 정상)
 - [ ] Grafana에서 `http_server_requests_seconds_count{application="backend-book"}` / `_bucket` 조회 확인
 - [ ] infra 저장소에 회신값 전달 (`<SVC>=backend-book`, ServiceMonitor `backend-book`/`dpyb-book-dev`, Micrometer 기본 메트릭명, 스크레이핑 확인 결과) — 전달 채널(infra 이슈/PR 등)은 사용자 확인 대기
 
