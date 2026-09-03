@@ -33,6 +33,9 @@ data:
   # 메트릭은 메인 8080(ALB 노출) 이 아니라 별도 관리 포트 8081 로 서비스한다. ALB Ingress 는 8080 만
   # 노출하므로 /actuator/prometheus 가 인터넷에 열리지 않고, ServiceMonitor 가 클러스터 내부에서
   # metrics 포트(8081)를 스크레이핑한다(deployment-patch.yaml / service-patch.yaml).
+  # 관리 포트 8081 도 앱의 SecurityFilterChain 을 타므로(Spring Boot 가 부모의 springSecurityFilterChain 을
+  # 자식 관리 컨텍스트에 재등록), 무인증 스크레이핑은 SecurityConfig 의 actuatorSecurityFilterChain 이
+  # /actuator/prometheus·/actuator/health 를 permitAll 로 열어 주어야 가능하다 (CLIAR-255).
   MANAGEMENT_SERVER_PORT: '8081'
   MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: 'health,prometheus'
 

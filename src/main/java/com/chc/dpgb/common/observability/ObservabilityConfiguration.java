@@ -16,8 +16,10 @@ class ObservabilityConfiguration {
      * k8s readiness/liveness 프로브(`/health`, pod당 10~20초 간격)와 Swagger 문서 자산(`/docs`·`/webjars`·`/openapi.yaml`),
      * Prometheus ServiceMonitor 스크레이핑(`/actuator`, 30초 간격)은 비즈니스 트래픽이 아닌데 자동 계측이 매 요청 span을
      * 만들어, dev sampling 1.0에서 Tempo를 인프라 trace로 도배한다.
-     * `/health`·`/openapi.yaml`·`/docs`·`/webjars`는 SecurityConfig의 permitAll 목록과 같다. `/actuator`는 별도 관리 포트(8081,
-     * dev overlay 전용)로 서비스되어 메인 SecurityFilterChain을 타지 않으므로 permitAll 목록에는 없다.
+     * `/health`·`/openapi.yaml`·`/docs`·`/webjars`는 SecurityConfig 메인 체인의 permitAll 목록과 같다. `/actuator`는 별도 관리
+     * 포트(8081, dev overlay 전용)로 서비스되지만 그 포트도 같은 SecurityFilterChain 목록을 타므로(CLIAR-255), SecurityConfig의
+     * 전용 `actuatorSecurityFilterChain`이 `/actuator/prometheus`·`/actuator/health`를 무인증 허용한다 — 여기 관측 제외는 접두사
+     * `/actuator` 전체이고 무인증 허용은 그 두 경로만이라 범위가 다르다.
      */
     private static final List<String> UNOBSERVED_PATHS =
             List.of("/health", "/openapi.yaml", "/docs", "/webjars", "/actuator");
